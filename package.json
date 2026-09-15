@@ -1,0 +1,42 @@
+{
+  "name": "task-management-app",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "vp build",
+    "preview": "vp preview",
+    "test": "vp test",
+    "vize:lint": "vize lint --preset happy-path --max-warnings 0 src",
+    "vize:fmt": "vize fmt --check src",
+    "vize:fmt:fix": "vize fmt --write src",
+    "vize:check": "vize check"
+  },
+  "dependencies": {
+    "vue": "^3.5.40"
+  },
+  "devDependencies": {
+    "@tsconfig/node24": "^24.0.4",
+    "@types/node": "^24.13.3",
+    "@vizejs/vite-plugin": "^0.424.10",
+    "@vue/tsconfig": "^0.9.1",
+    "oxlint-plugin-vize": "^0.424.10",
+    "typescript": "~6.0.0",
+    "vite": "catalog:",
+    "vite-plugin-vue-devtools": "^8.1.5",
+    "vite-plus": "catalog:",
+    "vize": "^0.424.10"
+  },
+  "engines": {
+    "node": "^22.18.0 || >=24.12.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.4.2",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.4.2"
+}
