@@ -1,0 +1,78 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+  button { font: inherit; border: 0; background: none; cursor: pointer; color: inherit; }
+
+  .blue   { --main: #2f7fe8; --ink: #1756a6; --soft: #dceafc; --bg: #eaf3fd; }
+  .pink   { --main: #e45b8b; --ink: #a52654; --soft: #fbdde8; --bg: #fdeef3; }
+  .green  { --main: #2fae86; --ink: #117351; --soft: #d6f2e6; --bg: #e8f7f0; }
+  .orange { --main: #f28a1e; --ink: #a65300; --soft: #fde6cc; --bg: #fff3e4; }
+
+  .study-app {
+    font-family: "Hiragino Maru Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    color: #1f2a3a; min-height: 100dvh; display: flex; flex-direction: column;
+    background: linear-gradient(var(--bg), #fff 320px);
+  }
+  main { flex: 1; padding: 20px 16px; }
+  [hidden] { display: none !important; }
+
+  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .head .icon { font-size: 40px; }
+  .head h1 { font-size: 20px; }
+  .head p { font-size: 12px; color: #667; margin-top: 4px; }
+  .points {
+    margin-left: auto; flex: none; display: flex; align-items: center; gap: 6px; font-weight: bold;
+    background: #fff; border-radius: 999px; padding: 4px 12px; box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  }
+  .points i { font-style: normal; background: #f6b917; color: #fff; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; }
+
+  .rate { background: #fff; border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  .rate div:first-child { display: flex; justify-content: space-between; align-items: baseline; font-weight: bold; }
+  .rate b { font-size: 20px; }
+
+  .tasks { list-style: none; display: grid; gap: 10px; }
+  .tasks label {
+    display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 14px;
+    padding: 14px; font-weight: bold; box-shadow: 0 1px 3px rgba(0,0,0,.06); cursor: pointer;
+  }
+  .tasks input { appearance: none; width: 24px; height: 24px; border: 2px solid #737d8b; border-radius: 6px; display: grid; place-items: center; flex: none; }
+  .tasks input:checked { background: var(--ink); border-color: var(--ink); }
+  .tasks input:checked::after { content: "✓"; color: #fff; }
+  .tasks input:focus-visible { outline: 3px solid var(--soft); }
+  .plus { margin-left: auto; font-size: 12px; color: #895000; background: #fff3d6; padding: 2px 8px; border-radius: 999px; }
+
+  .primary { background: var(--ink); color: #fff; font-weight: bold; border-radius: 999px; padding: 14px; width: 100%; margin-top: 18px; }
+
+  nav { position: sticky; bottom: 0; display: flex; background: #fff; border-top: 1px solid #e6eaf0; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); }
+  nav button { flex: 1; font-size: 11px; color: #889; }
+  nav button b { display: block; font-size: 20px; font-weight: normal; }
+  nav button[aria-current="page"] { color: var(--ink); font-weight: bold; }
+  nav button:disabled { opacity: .4; cursor: default; }
+
+  dialog { margin: auto auto 0; width: 100%; max-height: 80dvh; border: 0; border-radius: 20px 20px 0 0; padding: 20px 16px; }
+  dialog::backdrop { background: rgba(20, 30, 50, .4); }
+  dialog h3 { font-size: 13px; color: #667; margin: 14px 0 8px; }
+  dialog .options { display: flex; flex-wrap: wrap; gap: 8px; }
+  dialog .options button { background: var(--bg); border-radius: 999px; padding: 8px 14px; font-size: 14px; }
+  dialog .options button:disabled { opacity: .35; cursor: default; }
+
+  .celebrate[open] {
+    position: fixed; inset: 0; margin: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; border-radius: 0; background: linear-gradient(#fff, var(--bg)); display: flex;
+    flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; padding: 24px; z-index: 1;
+  }
+  .celebrate .face { font-size: 96px; animation: hop .8s ease-in-out infinite alternate; }
+  .celebrate h2 { font-size: 24px; }
+  .celebrate p { color: var(--ink); font-weight: bold; }
+  .celebrate .primary { width: auto; padding: 12px 28px; }
+  @keyframes hop { to { translate: 0 -12px; } }
+  @media (prefers-reduced-motion: reduce) { .celebrate .face { animation: none; } }
+
+  html, body, #app { min-height: 100%; }
+  .study-app { min-height: 100dvh; }
+  button:focus-visible, input:focus-visible { outline: 3px solid #1f2a3a; outline-offset: 3px; }
+  .head h1 { font-size: clamp(16px, 4.5vw, 20px); }
+  progress { appearance: none; display: block; width: 100%; height: 10px; border: 0; border-radius: 999px; margin-top: 8px; overflow: hidden; background: var(--soft); }
+  progress::-webkit-progress-bar { background: var(--soft); }
+  progress::-webkit-progress-value { background: var(--ink); border-radius: 999px; transition: width .3s; }
+  progress::-moz-progress-bar { background: var(--ink); border-radius: 999px; }
+  dialog h2 { font-size: 16px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+  @media (prefers-reduced-motion: reduce) { progress::-webkit-progress-value { transition: none; } }

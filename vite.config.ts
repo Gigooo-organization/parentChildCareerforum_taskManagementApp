@@ -17,6 +17,17 @@ export default defineConfig({
     },
   }),
   plugins: [vize(), vueDevTools()],
+  test: {
+    include: ["{src,shared,server,booth-app}/**/*.test.ts"],
+  },
+  build: {
+    rolldownOptions: {
+      input: {
+        workspace: fileURLToPath(new URL("./index.html", import.meta.url)),
+        participant: fileURLToPath(new URL("./booth-app/index.html", import.meta.url)),
+      },
+    },
+  },
   server: {
     watch: {
       // nix-direnv が .direnv/flake-inputs 配下に nixpkgs のソース全体を
@@ -28,6 +39,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "@booth-shared": fileURLToPath(new URL("./shared", import.meta.url)),
     },
   },
 });
