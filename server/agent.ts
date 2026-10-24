@@ -274,7 +274,7 @@ export async function runAgent(options: {
     }
     const schemaPath = join(runtime, "schema.json");
     await writeFile(schemaPath, JSON.stringify(schema));
-    const input = `あなたは中学生の勉強タスクアプリ制作を手伝います。アプリと無関係な依頼は拒否してください。ツール、シェル、ネット通信は使わないでください。提示されたsrcファイルだけを編集し、変更したファイルの全文をfilesに入れたJSONを返してください。空のfilesは拒否を意味します。既存の設定機能と@booth-sharedの参照を維持してください。新しい依存関係や外部URLは使えません。\n依頼: ${options.prompt}\n現在のファイル: ${JSON.stringify(source)}`;
+    const input = `あなたは中学生の勉強タスクアプリ制作を手伝います。アプリと無関係な依頼は拒否してください。ツール、シェル、ネット通信は使わないでください。提示されたsrcファイルだけを編集し、変更したファイルの全文をfilesに入れたJSONを返してください。空のfilesは拒否を意味します。既存の設定機能と@booth-sharedの参照を維持してください。messageには変更結果だけを参加者向けの短い日本語で書き、ファイル名やコードは書かないでください。新しい依存関係や外部URLは使えません。\n依頼: ${options.prompt}\n現在のファイル: ${JSON.stringify(source)}`;
     const args =
       options.provider === "claude"
         ? [

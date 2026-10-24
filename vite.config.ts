@@ -30,6 +30,9 @@ export default defineConfig({
     },
   },
   server: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: true,
     watch: {
       // nix-direnv が .direnv/flake-inputs 配下に nixpkgs のソース全体を
       // 置くため、除外しないと dev サーバのウォッチャがそれを走査して

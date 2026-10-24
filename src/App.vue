@@ -5,6 +5,7 @@ import type { Answer, CatalogCard, CatalogId } from "@booth-shared/catalog";
 import { parseFeatures } from "@booth-shared/features";
 import type { Features } from "@booth-shared/features";
 import { parseWorkspaceState, safeUrl } from "@booth-shared/workspace";
+import BoothChat from "./components/BoothChat.vue";
 
 type Column = "todo" | "doing" | "done";
 type WorkspaceCard = CatalogCard & { column: Column; answers: Answer[] };
@@ -23,7 +24,9 @@ const action = computed(() =>
   selected.value ? actionFromAnswers(selected.value.id, selected.value.answers) : null,
 );
 const nextQuestion = computed(() => selected.value?.questions[selected.value.answers.length]);
-const busy = ref(false);
+const applying = ref(false);
+const aiRunning = ref(false);
+const busy = computed(() => applying.value || aiRunning.value);
 const error = ref("");
 const messages = ref([
   "カードを押して、作りたい機能を決めよう。プレビューで自分のアプリを試せるよ！",
@@ -75,6 +78,12 @@ async function loadState() {
   }
 }
 onMounted(loadState);
+async function resetWorkspace() {
+  messages.value = ["新しい体験をはじめよう！ カードで作りたい機能を選んでね。"];
+  selectedId.value = null;
+  dialog.value?.close();
+  await loadState();
+}
 
 function openCard(card: CatalogCard) {
   if (busy.value || !ready.value) return;
@@ -94,7 +103,7 @@ async function develop(id: CatalogId) {
     return;
   }
   error.value = "";
-  busy.value = true;
+  applying.value = true;
   const previousColumn = card.column;
   card.column = "doing";
   dialog.value?.close();
@@ -114,7 +123,7 @@ async function develop(id: CatalogId) {
     card.column = previousColumn;
     error.value = cause instanceof Error ? cause.message : "変更を反映できませんでした。";
   } finally {
-    busy.value = false;
+    applying.value = false;
   }
 }
 function dropCard() {
@@ -177,10 +186,10 @@ function dropCard() {
           </section>
         </div>
       </section>
-      <section aria-labelledby="chat-title" class="panel chat-panel">
-        <h2 id="chat-title">AI に頼む</h2>
-        <div aria-live="polite" class="log"><p v-for="(message, index) in messages" :key="index" class="msg ai">{{ message }}</p></div>
-        <p class="chat-note">自由なお願いは、スタッフの確認後にAIへ送る機能を準備中です。</p>
+      <section aria-label="AIに頼む" class="panel chat-panel">
+        <BoothChat @running="aiRunning = $event" @changed="loadState" @reset="resetWorkspace">
+          <p v-for="(message, index) in messages" :key="index" class="msg ai">{{ message }}</p>
+        </BoothChat>
       </section>
     </div>
     <section aria-label="アプリのプレビュー" class="preview">
@@ -194,8 +203,8 @@ function dropCard() {
           title="わたしの勉強リストのプレビュー"
         ></iframe>
         <div v-if="busy" class="building-overlay" role="status">
-          <span aria-hidden="true" class="bot">🤖</span><strong>アプリに反映しています</strong><progress aria-label="変更を反映中"></progress>
-          <small>決めた設定をプレビューに届けています</small>
+          <span aria-hidden="true" class="bot">🤖</span><strong>{{ aiRunning ? "AIがアプリを作っています" : "アプリに反映しています" }}</strong><progress aria-label="変更を反映中"></progress>
+          <small>{{ aiRunning ? "できあがるまで、少し待ってね" : "決めた設定をプレビューに届けています" }}</small>
         </div>
       </div>
     </section>

@@ -4,68 +4,17 @@ import { createServer, type Plugin, type ViteDevServer } from "vite";
 import vize from "@vizejs/vite-plugin";
 import { Workspace } from "./workspace";
 import { previewBoundary } from "./preview";
+import { createBoothRuntime } from "./runtime";
+import { createChatApi } from "./chat-api";
 
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+import { HttpError, assertLocalRequest, readJson, sendJson } from "./http";
 
-export function assertLocalRequest(req: IncomingMessage) {
-  const host = req.headers.host;
-  const peer = req.socket.remoteAddress;
-  if (
-    !host ||
-    !/^(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/.test(host) ||
-    !peer ||
-    !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(peer)
-  ) {
-    throw new HttpError(403, "この操作はこのPCからのみ利用できます。");
-  }
-  const origin = req.headers.origin;
-  if (
-    (origin !== undefined && origin !== `http://${host}`) ||
-    (req.method !== "GET" && origin === undefined)
-  ) {
-    throw new HttpError(403, "この画面から操作しなおしてください。");
-  }
-  if (req.headers["sec-fetch-site"] === "cross-site") {
-    throw new HttpError(403, "この画面から操作しなおしてください。");
-  }
-}
-
-export async function readJson(req: IncomingMessage): Promise<unknown> {
-  if (req.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") {
-    throw new HttpError(415, "JSONで送信してください。");
-  }
-  let size = 0;
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += bytes.length;
-    if (size > 16 * 1024) throw new HttpError(413, "送信する内容が長すぎます。");
-    chunks.push(bytes);
-  }
-  try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  } catch {
-    throw new HttpError(400, "送信した内容を読み取れませんでした。");
-  }
-}
-
-export function sendJson(res: ServerResponse, status: number, data: unknown) {
-  res.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-  });
-  res.end(JSON.stringify(data));
-}
-
-export function createBoothMiddleware(workspace: Workspace, previewUrl: () => string) {
+export function createBoothMiddleware(
+  workspace: Workspace,
+  previewUrl: () => string,
+  runtime?: ReturnType<typeof createBoothRuntime>,
+  resetPreview?: () => Promise<void>,
+) {
   const state = async () => ({
     features: await workspace.readFeatures(),
     previewUrl: previewUrl(),
@@ -82,10 +31,26 @@ export function createBoothMiddleware(workspace: Workspace, previewUrl: () => st
       if (path === "/api/state" && req.method === "GET") {
         sendJson(res, 200, await state());
       } else if (path === "/api/features" && req.method === "POST") {
-        sendJson(res, 200, await workspace.writeFeatures(await readJson(req)));
+        runtime?.assertHealthy();
+        const revision = workspace.revision;
+        const body = await readJson(req);
+        sendJson(
+          res,
+          200,
+          await workspace.writeFeatures(body, () => {
+            runtime?.assertHealthy();
+            if (workspace.revision !== revision)
+              throw new HttpError(
+                409,
+                "体験がリセットされました。画面を読み込みなおしてください。",
+              );
+          }),
+        );
       } else if (path === "/api/reset" && req.method === "POST") {
         await readJson(req);
-        await workspace.reset();
+        if (runtime) await runtime.reset();
+        else await workspace.reset();
+        await resetPreview?.();
         sendJson(res, 200, await state());
       } else if (["/api/state", "/api/features", "/api/reset"].includes(path)) {
         throw new HttpError(405, "この操作は利用できません。");
@@ -103,15 +68,25 @@ export function createBoothMiddleware(workspace: Workspace, previewUrl: () => st
 
 export function boothPlugin(): Plugin {
   let preview: ViteDevServer | undefined;
+  let runtime: ReturnType<typeof createBoothRuntime> | undefined;
+  let chat: ReturnType<typeof createChatApi> | undefined;
   async function closePreview() {
     const current = preview;
     preview = undefined;
+    chat?.close();
+    chat = undefined;
+    const currentRuntime = runtime;
+    runtime = undefined;
+    await currentRuntime?.close();
     await current?.close();
   }
   return {
     name: "booth-workspace",
     apply: (_config, environment) => environment.command === "serve" && environment.mode !== "test",
     async configureServer(server) {
+      const provider = process.env.BOOTH_AI_PROVIDER ?? "codex";
+      if (provider !== "codex" && provider !== "claude")
+        throw new Error("BOOTH_AI_PROVIDERはcodexかclaudeを指定してください。");
       const restart = server.restart.bind(server);
       server.restart = async (forceOptimize) => {
         await closePreview();
@@ -182,7 +157,19 @@ export function boothPlugin(): Plugin {
         preview = undefined;
         throw error;
       }
-      server.middlewares.use(createBoothMiddleware(workspace, () => previewUrl));
+      runtime = createBoothRuntime(workspace, provider);
+      chat = createChatApi(runtime);
+      server.middlewares.use(chat.middleware);
+      server.middlewares.use(
+        createBoothMiddleware(
+          workspace,
+          () => previewUrl,
+          runtime,
+          async () => {
+            await preview?.restart();
+          },
+        ),
+      );
     },
     closeBundle: closePreview,
   };

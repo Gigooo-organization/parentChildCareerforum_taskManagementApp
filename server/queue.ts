@@ -1,15 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentOutput } from "./agent";
 
-export type JobStatus =
-  | "pending"
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "timed_out"
-  | "cancelled";
-export type Job = { id: string; prompt: string; status: JobStatus; message: string };
+import type { Job } from "../shared/jobs";
 type Hooks<Snapshot> = {
   snapshot: () => Promise<Snapshot>;
   restore: (snapshot: Snapshot) => Promise<void>;

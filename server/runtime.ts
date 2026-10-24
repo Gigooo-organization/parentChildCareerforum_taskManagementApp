@@ -85,6 +85,9 @@ export function createBoothRuntime(workspace: Workspace, provider: Provider, exe
 
   return {
     queue,
+    get revision() {
+      return workspace.revision;
+    },
     assertHealthy() {
       if (!healthy || resetting || closed)
         throw new Error("スタッフが「次の人へ」でリセットしてください。");

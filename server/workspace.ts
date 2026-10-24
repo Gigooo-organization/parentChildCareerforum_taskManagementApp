@@ -41,8 +41,9 @@ export class Workspace {
     });
   }
 
-  writeFeatures(input: unknown) {
+  writeFeatures(input: unknown, assertCurrent?: () => void) {
     return this.serialize(async () => {
+      assertCurrent?.();
       const features = parseFeatures(input);
       await this.#assertApp();
       const temporary = join(this.appDir, `.features-${randomUUID()}.json`);
