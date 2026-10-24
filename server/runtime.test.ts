@@ -26,7 +26,7 @@ function finished(runtime: ReturnType<typeof createBoothRuntime>, id: string) {
   return new Promise<ReturnType<typeof runtime.queue.jobs>[number]>((resolve) => {
     const unsubscribe = runtime.queue.subscribe((jobs) => {
       const job = jobs.find((item) => item.id === id);
-      if (job && !["pending", "queued", "running"].includes(job.status)) {
+      if (job && !["draft", "pending", "queued", "running"].includes(job.status)) {
         unsubscribe();
         resolve(job);
       }
@@ -50,6 +50,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("見出しを変えて");
     const done = finished(runtime, job.id);
+    runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("succeeded");
     expect(await readFile(join(workspace.appDir, "src", "App.vue"), "utf8")).toContain(
@@ -79,6 +80,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("壊れた変更のテスト");
     const done = finished(runtime, job.id);
+    runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("failed");
     expect(await readFile(join(workspace.appDir, "src", "App.vue"), "utf8")).toBe(source);
@@ -103,6 +105,7 @@ describe("booth AI runtime", () => {
     });
     runtimes.push(runtime);
     const job = runtime.queue.submit("変更して");
+    runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     await executing;
     const resetting = runtime.reset();
@@ -122,6 +125,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("変更して");
     const done = finished(runtime, job.id);
+    runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("failed");
     runtime.assertHealthy();
@@ -141,6 +145,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("見た目を変えて");
     const done = finished(runtime, job.id);
+    runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).message).toContain("CSS");
     expect(await readFile(join(workspace.appDir, "src", "App.vue"), "utf8")).toBe(source);
@@ -162,6 +167,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("変更して");
     const done = finished(runtime, job.id);
+    runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("failed");
     expect(() => runtime.assertHealthy()).toThrow();

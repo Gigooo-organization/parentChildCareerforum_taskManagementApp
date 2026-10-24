@@ -1,4 +1,5 @@
 export const jobStatusLabels = {
+  draft: "つぎに作る",
   pending: "スタッフの確認待ち",
   queued: "順番待ち",
   running: "AIが作っています",
@@ -9,6 +10,25 @@ export const jobStatusLabels = {
 };
 export type JobStatus = keyof typeof jobStatusLabels;
 export type Job = { id: string; prompt: string; status: JobStatus; message: string };
+
+const columns = {
+  draft: "todo",
+  pending: "todo",
+  queued: "doing",
+  running: "doing",
+  succeeded: "done",
+  failed: "todo",
+  timed_out: "todo",
+  cancelled: null,
+} satisfies Record<JobStatus, "todo" | "doing" | "done" | null>;
+
+export function jobColumn(job: Job) {
+  return columns[job.status];
+}
+
+export function canRequestJob(job: Job) {
+  return job.status === "draft" || job.status === "failed" || job.status === "timed_out";
+}
 
 function isStatus(value: unknown): value is JobStatus {
   return typeof value === "string" && Object.hasOwn(jobStatusLabels, value);

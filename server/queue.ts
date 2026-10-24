@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentOutput } from "./agent";
 
-import type { Job } from "../shared/jobs";
+import { canRequestJob, type Job } from "../shared/jobs";
 type Hooks<Snapshot> = {
   snapshot: () => Promise<Snapshot>;
   restore: (snapshot: Snapshot) => Promise<void>;
@@ -141,7 +141,7 @@ export function createQueue<Snapshot = unknown>(
         throw new Error("依頼は1〜1000文字で入力してください。");
       while (jobs.length >= 30) {
         const index = jobs.findIndex(
-          (job) => !["pending", "queued", "running"].includes(job.status),
+          (job) => job.status === "succeeded" || job.status === "cancelled",
         );
         if (index < 0) throw new Error("依頼がいっぱいです。スタッフに確認してください。");
         jobs.splice(index, 1);
@@ -149,11 +149,21 @@ export function createQueue<Snapshot = unknown>(
       const job: Job = {
         id: randomUUID(),
         prompt: prompt.trim(),
-        status: "pending",
-        message: "スタッフの確認を待っています。",
+        status: "draft",
+        message: "「作る」を押すとスタッフに確認をお願いします。",
       };
       jobs.push(job);
       emit();
+      return { ...job };
+    },
+    request(id: string) {
+      if (resetting || halted) throw new Error("スタッフがリセットしてから依頼してください。");
+      const job = find(id);
+      if (canRequestJob(job)) {
+        job.status = "pending";
+        job.message = "スタッフの確認を待っています。";
+        emit();
+      }
       return { ...job };
     },
     approve(id: string) {
@@ -168,7 +178,7 @@ export function createQueue<Snapshot = unknown>(
     },
     reject(id: string) {
       const job = find(id);
-      if (job.status === "pending" || job.status === "queued") {
+      if (canRequestJob(job) || job.status === "pending" || job.status === "queued") {
         job.status = "cancelled";
         job.message = "スタッフが依頼を取り消しました。";
         emit();
@@ -178,7 +188,8 @@ export function createQueue<Snapshot = unknown>(
     async reset() {
       resetting = true;
       for (const job of jobs)
-        if (job.status === "pending" || job.status === "queued") job.status = "cancelled";
+        if (job.status === "draft" || job.status === "pending" || job.status === "queued")
+          job.status = "cancelled";
       controller?.abort();
       try {
         await running;

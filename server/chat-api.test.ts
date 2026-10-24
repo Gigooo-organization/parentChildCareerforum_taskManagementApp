@@ -168,7 +168,16 @@ describe("staff-approved chat HTTP flow", () => {
     const stream = await app.events();
     expect(await stream.until(() => true)).toEqual([]);
     const job = await app.submit();
-    expect(job.status).toBe("pending");
+    expect(job.status).toBe("draft");
+    await stream.until((jobs) =>
+      jobs.some((item) => item.id === job.id && item.status === "draft"),
+    );
+    expect(app.calls()).toBe(0);
+    expect(
+      parseJobs([await (await app.post(`/api/chat/${job.id}/approve`, {})).json()])[0]?.status,
+    ).toBe("draft");
+    expect(app.calls()).toBe(0);
+    expect((await app.post(`/api/chat/${job.id}/request`, {})).status).toBe(200);
     await stream.until((jobs) =>
       jobs.some((item) => item.id === job.id && item.status === "pending"),
     );
@@ -208,6 +217,7 @@ describe("staff-approved chat HTTP flow", () => {
     const active = await app.submit();
     const stream = await app.events();
     await stream.until(() => true);
+    await app.post(`/api/chat/${active.id}/request`, {});
     await app.post(`/api/chat/${active.id}/approve`, {});
     await executing;
     await app.submit();
@@ -226,11 +236,12 @@ describe("staff-approved chat HTTP flow", () => {
     for (const origin of ["null", "https://example.com", "http://127.0.0.1:5174"]) {
       expect((await fetch(app.url + "/api/events", { headers: { origin } })).status).toBe(403);
       expect((await app.post(`/api/chat/${job.id}/approve`, {}, { origin })).status).toBe(403);
+      expect((await app.post(`/api/chat/${job.id}/request`, {}, { origin })).status).toBe(403);
     }
     expect((await app.post("/api/chat", { prompt: " " })).status).toBe(400);
     expect((await app.post("/api/chat", { prompt: "x".repeat(1001) })).status).toBe(400);
     expect((await fetch(app.url + "/api/chat")).status).toBe(405);
     expect(app.calls()).toBe(0);
-    expect(app.runtime.queue.jobs()[0]?.status).toBe("pending");
+    expect(app.runtime.queue.jobs()[0]?.status).toBe("draft");
   });
 });
