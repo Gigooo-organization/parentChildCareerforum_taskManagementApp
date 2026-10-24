@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref, useTemplateRef } from "vue";
+import { computed, onMounted, ref, useTemplateRef } from "vue";
 import { actionFromAnswers, applyAction, catalog, instructionFor } from "@booth-shared/catalog";
 import type { Answer, CatalogCard, CatalogId } from "@booth-shared/catalog";
 import { parseFeatures } from "@booth-shared/features";
 import type { Features } from "@booth-shared/features";
+import { parseWorkspaceState, safeUrl } from "@booth-shared/workspace";
 
 type Column = "todo" | "doing" | "done";
 type WorkspaceCard = CatalogCard & { column: Column; answers: Answer[] };
@@ -30,9 +31,53 @@ const messages = ref([
 const dialog = useTemplateRef<HTMLDialogElement>("cardDialog");
 const dragged = ref<CatalogId | null>(null);
 const over = ref(false);
+const ready = ref(false);
+const previewUrl = ref("");
+const revision = ref(0);
+
+async function loadState() {
+  try {
+    const response = await fetch("/api/state");
+    if (!response.ok) throw new Error("作業状態を読み取れません。スタッフに確認してください。");
+    const state = parseWorkspaceState(await response.json());
+    features.value = state.features;
+    previewUrl.value = state.previewUrl;
+    revision.value = state.revision;
+    for (const card of cards.value) {
+      switch (card.id) {
+        case "points":
+          card.answers = state.features.points ? [state.features.points.per] : [];
+          break;
+        case "progress":
+          card.answers = state.features.progress ? [state.features.progress.number] : [];
+          break;
+        case "celebrate":
+          card.answers = state.features.celebrate
+            ? [state.features.celebrate.face, state.features.celebrate.msg]
+            : [];
+          break;
+        default:
+          card.answers = [];
+      }
+      card.column = card.questions.length
+        ? card.answers.length
+          ? "done"
+          : "todo"
+        : card.id === state.features.color
+          ? "done"
+          : "todo";
+    }
+    error.value = "";
+    ready.value = true;
+  } catch (cause) {
+    ready.value = false;
+    error.value = cause instanceof Error ? cause.message : "接続できませんでした。";
+  }
+}
+onMounted(loadState);
 
 function openCard(card: CatalogCard) {
-  if (busy.value) return;
+  if (busy.value || !ready.value) return;
   selectedId.value = card.id;
   error.value = "";
   dialog.value?.showModal();
@@ -42,7 +87,7 @@ function answer(value: Answer) {
 }
 async function develop(id: CatalogId) {
   const card = cards.value.find((item) => item.id === id);
-  if (!card || busy.value) return;
+  if (!card || busy.value || !ready.value) return;
   const chosen = actionFromAnswers(card.id, card.answers);
   if (!chosen) {
     openCard(card);
@@ -84,7 +129,7 @@ function dropCard() {
     <div class="left">
       <section aria-labelledby="board-title" class="panel board-panel">
         <h1 id="board-title">次の開発リスト <small>カードでくわしく決めたら「作る」を押そう</small></h1>
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <p v-if="error" class="error" role="alert">{{ error }} <button v-if="!ready" type="button" @click="loadState">再接続</button></p>
         <div class="cols">
           <section
             v-for="column in columns"
@@ -105,18 +150,23 @@ function dropCard() {
                 v-for="card in cards.filter(item => item.column === column.id)"
                 :key="card.id"
                 class="card"
-                :draggable="!busy"
+                :draggable="!busy && ready"
                 @dragstart="dragged = card.id"
                 @dragend="dragged = null; over = false"
               >
-                <button class="card-detail" :disabled="busy" type="button" @click="openCard(card)">
+                <button
+                  class="card-detail"
+                  :disabled="busy || !ready"
+                  type="button"
+                  @click="openCard(card)"
+                >
                   <strong>{{ card.title }}</strong><small>{{ card.description }}</small>
                   <span v-if="card.answers.length" class="spec">{{ actionFromAnswers(card.id, card.answers) ? "仕様が決まったよ" : "つづきを決めよう" }}</span>
                 </button>
                 <button
                   v-if='card.column !== "doing"'
                   class="go"
-                  :disabled="busy"
+                  :disabled="busy || !ready"
                   type="button"
                   :aria-label='`${card.title}を${card.column === "done" ? "作り直す" : "作る"}`'
                   @click="develop(card.id)"
@@ -137,8 +187,10 @@ function dropCard() {
       <p class="preview-label">📱 プレビュー</p>
       <div :class='["phone", { building: busy }]'>
         <iframe
-          sandbox="allow-scripts allow-same-origin"
-          src="/booth-app/"
+          v-if="previewUrl"
+          :key="revision"
+          sandbox="allow-scripts"
+          :src="safeUrl(previewUrl)"
           title="わたしの勉強リストのプレビュー"
         ></iframe>
         <div v-if="busy" class="building-overlay" role="status">

@@ -8,10 +8,10 @@
     "build": "vp build",
     "preview": "vp preview",
     "test": "vp test",
-    "vize:lint": "vize lint --preset happy-path --max-warnings 0 src booth-app/src shared",
-    "vize:fmt": "vize fmt --check src booth-app/src shared",
-    "vize:fmt:fix": "vize fmt --write src booth-app/src shared",
-    "vize:check": "vize check"
+    "vize:lint": "vize lint --preset happy-path --max-warnings 0 src booth-app/src shared server",
+    "vize:fmt": "vize fmt --check src booth-app/src shared server",
+    "vize:fmt:fix": "vize fmt --write src booth-app/src shared server",
+    "vize:check": "vize check --tsconfig tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
     "vue": "^3.5.40"
@@ -21,6 +21,7 @@
     "@types/node": "^24.13.3",
     "@vizejs/vite-plugin": "^0.424.10",
     "@vue/tsconfig": "^0.9.1",
+    "lightningcss": "1.33.0",
     "oxlint-plugin-vize": "^0.424.10",
     "typescript": "~6.0.0",
     "vite": "catalog:",
