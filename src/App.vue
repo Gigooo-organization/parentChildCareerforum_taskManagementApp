@@ -6,6 +6,7 @@ import { parseFeatures } from "@booth-shared/features";
 import type { Features } from "@booth-shared/features";
 import { parseWorkspaceState, safeUrl } from "@booth-shared/workspace";
 import BoothChat from "./components/BoothChat.vue";
+import { buildCatalog } from "./catalogBuild";
 
 type Column = "todo" | "doing" | "done";
 type WorkspaceCard = CatalogCard & { column: Column; answers: Answer[] };
@@ -105,21 +106,27 @@ async function develop(id: CatalogId) {
   error.value = "";
   applying.value = true;
   const previousColumn = card.column;
+  const startedRevision = revision.value;
   card.column = "doing";
   dialog.value?.close();
   messages.value.push(`AI への指示：${instructionFor(chosen)}`);
   try {
-    const response = await fetch("/api/features", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(applyAction(features.value, chosen)),
+    const updated = await buildCatalog(async () => {
+      const response = await fetch("/api/features", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(applyAction(features.value, chosen)),
+      });
+      if (!response.ok)
+        throw new Error("変更を反映できませんでした。スタッフに確認して、もう一度試してね。");
+      return parseFeatures(await response.json());
     });
-    if (!response.ok)
-      throw new Error("変更を反映できませんでした。スタッフに確認して、もう一度試してね。");
-    features.value = parseFeatures(await response.json());
+    if (revision.value !== startedRevision) return;
+    features.value = updated;
     card.column = "done";
     messages.value.push(`${card.title}が完成！ プレビューで試してみよう。`);
   } catch (cause) {
+    if (revision.value !== startedRevision) return;
     card.column = previousColumn;
     error.value = cause instanceof Error ? cause.message : "変更を反映できませんでした。";
   } finally {
@@ -194,7 +201,7 @@ function dropCard() {
     </div>
     <section aria-label="アプリのプレビュー" class="preview">
       <p class="preview-label">📱 プレビュー</p>
-      <div :class='["phone", { building: busy }]'>
+      <div :class='["phone", { building: busy }]' :aria-busy="busy">
         <iframe
           v-if="previewUrl"
           :key="revision"
@@ -203,8 +210,8 @@ function dropCard() {
           title="わたしの勉強リストのプレビュー"
         ></iframe>
         <div v-if="busy" class="building-overlay" role="status">
-          <span aria-hidden="true" class="bot">🤖</span><strong>{{ aiRunning ? "AIがアプリを作っています" : "アプリに反映しています" }}</strong><progress aria-label="変更を反映中"></progress>
-          <small>{{ aiRunning ? "できあがるまで、少し待ってね" : "決めた設定をプレビューに届けています" }}</small>
+          <span aria-hidden="true" class="bot">🤖</span><strong>AIがアプリを作っています</strong><progress aria-label="アプリを作成中"></progress>
+          <small>{{ aiRunning ? "できあがるまで、少し待ってね" : "選んだ内容を、アプリに組み込んでいます" }}</small>
         </div>
       </div>
     </section>
