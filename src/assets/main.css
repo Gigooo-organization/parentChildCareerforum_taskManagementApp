@@ -53,6 +53,11 @@
 @media (max-width: 1100px) { .workspace { height: auto; min-height: 100dvh; grid-template-columns: minmax(0,1fr); } .left { grid-template-rows: minmax(350px,600px) auto; } .phone { height: 700px; min-height: 0; max-width: 100%; } .preview { padding: 18px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 .idea-input-panel { position: relative; }
+.hearing-form { display: grid; gap: 8px; margin-top: 14px; }
+.hearing-form textarea { width: 100%; resize: vertical; border: 1px solid #737d8b; border-radius: 8px; padding: 8px; font: inherit; }
+.hearing-form small { color: #556070; }
+.hearing-form button, .retry-check { border-radius: 10px; padding: 10px; }
+.retry-check { margin-top: 12px; }
 .idea-input-panel > h2 { padding: 12px 16px 0; }
 .input-note, .connection, .request-error, .input-notice { padding: 4px 16px; font-size: 12px; }
 .input-note { color: #556070; }

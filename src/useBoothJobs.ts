@@ -90,7 +90,7 @@ export function useBoothJobs(actions: Actions) {
       for (const job of submitted)
         if (!jobs.value.some((existing) => existing.id === job.id)) jobs.value.push(job);
       prompt.value = "";
-      notice.value = "「つぎに作る」に追加しました。カードの「作る」で進めよう。";
+      notice.value = "「つぎに作る」に追加しました。カードで内容を確認してね。";
     });
   }
 
@@ -104,6 +104,18 @@ export function useBoothJobs(actions: Actions) {
   function decide(job: Job, decision: "approve" | "reject") {
     return perform(async () => {
       await post(`/api/chat/${encodeURIComponent(job.id)}/${decision}`, {});
+    });
+  }
+
+  function clarify(job: Job, answer: string) {
+    return perform(async () => {
+      await post(`/api/chat/${encodeURIComponent(job.id)}/clarify`, { answer });
+    });
+  }
+
+  function retryCheck(job: Job) {
+    return perform(async () => {
+      await post(`/api/chat/${encodeURIComponent(job.id)}/retry-check`, {});
     });
   }
 
@@ -128,6 +140,8 @@ export function useBoothJobs(actions: Actions) {
     submit,
     requestBuild,
     decide,
+    clarify,
+    retryCheck,
     reset,
   };
 }

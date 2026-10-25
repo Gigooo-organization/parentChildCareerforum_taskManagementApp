@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useTemplateRef } from "vue";
+import { computed, onMounted, ref, useTemplateRef, watch } from "vue";
 import { actionFromAnswers, applyAction, catalog, instructionFor } from "@booth-shared/catalog";
 import type { Answer, CatalogCard, CatalogId } from "@booth-shared/catalog";
 import { parseFeatures } from "@booth-shared/features";
 import type { Features } from "@booth-shared/features";
 import { parseWorkspaceState, safeUrl } from "@booth-shared/workspace";
 import { useBoothJobs } from "./useBoothJobs";
-import { canRequestJob, jobColumn, jobStatusLabels } from "@booth-shared/jobs";
+import { canRequestJob, clarificationLimit, jobColumn, jobStatusLabels } from "@booth-shared/jobs";
 import type { Job } from "@booth-shared/jobs";
 import { buildCatalog } from "./catalogBuild";
 
@@ -46,6 +46,8 @@ const {
   submit,
   requestBuild,
   decide,
+  clarify,
+  retryCheck,
   reset: resetBooth,
 } = useBoothJobs({ changed: loadState, reset: resetWorkspace });
 const connected = computed(() => connection.value === "connected");
@@ -53,6 +55,13 @@ const aiRunning = computed(() => jobs.value.some((job) => job.status === "runnin
 const busy = computed(() => applying.value || aiRunning.value);
 const selectedIdeaId = ref<string | null>(null);
 const selectedIdea = computed(() => jobs.value.find((job) => job.id === selectedIdeaId.value));
+const clarification = ref("");
+const answerLimit = computed(() =>
+  selectedIdea.value ? clarificationLimit(selectedIdea.value) : 0,
+);
+watch(selectedIdeaId, () => {
+  clarification.value = "";
+});
 const ideaDialog = useTemplateRef<HTMLDialogElement>("ideaDialog");
 const staffOpen = ref(false);
 const confirmReset = ref(false);
@@ -78,6 +87,9 @@ async function buildIdea(job: Job) {
 }
 async function removeIdea(job: Job) {
   if (await decide(job, "reject")) ideaDialog.value?.close();
+}
+async function answerIdea(job: Job) {
+  if (await clarify(job, clarification.value)) clarification.value = "";
 }
 
 async function loadState() {
@@ -238,10 +250,16 @@ function dropCard() {
                   @click="buildIdea(job)"
                 >{{ job.status === "draft" ? "作る" : "再試行" }}</button>
                 <span
-                  v-else-if='job.status === "running"'
-                  aria-label="AIが作成中"
+                  v-else-if='job.status === "running" || job.status === "checking"'
+                  :aria-label='job.status === "checking" ? "内容を確認中" : "AIが作成中"'
                   class="spinner"
                 ></span>
+                <button
+                  v-else-if='job.status === "hearing" || job.status === "check_failed"'
+                  class="go"
+                  type="button"
+                  @click="openIdea(job)"
+                >{{ job.status === "hearing" ? "教える" : "内容を見る" }}</button>
               </li>
               <li
                 v-for="card in cards.filter(item => item.column === column.id)"
@@ -276,7 +294,7 @@ function dropCard() {
       </section>
       <section aria-labelledby="idea-input-title" class="panel idea-input-panel">
         <h2 id="idea-input-title">作りたいものを追加しよう</h2>
-        <p class="input-note">まず「つぎに作る」に追加。カードの「作る」を押して進めよう。</p>
+        <p class="input-note">まず「つぎに作る」に追加。内容を確認して、必要なことを聞いてから作ろう。</p>
         <p v-if='connection !== "connected"' class="connection" role="status">{{
             connection === "invalid"
               ? "カードの状態を読み取れません。スタッフに確認してください。"
@@ -398,7 +416,41 @@ function dropCard() {
                 : selectedIdea.status === "succeeded"
                   ? "できあがったよ！ プレビューで試してみよう。"
                   : selectedIdea.message
-            }}</p><p v-if="jobError" class="request-error" role="alert">{{ jobError }}</p><progress v-if='selectedIdea.status === "running"' aria-label="AIが作成中です"></progress></div>
+            }}</p><p v-if="jobError" class="request-error" role="alert">{{ jobError }}</p><progress
+            v-if='selectedIdea.status === "running" || selectedIdea.status === "checking"'
+            :aria-label='selectedIdea.status === "checking" ? "内容を確認中です" : "AIが作成中です"'
+          ></progress>
+          <form
+            v-if='selectedIdea.status === "hearing"'
+            class="hearing-form"
+            @submit.prevent="answerIdea(selectedIdea)"
+          >
+            <label for="hearing-answer">追加の説明</label>
+            <textarea
+              id="hearing-answer"
+              v-model="clarification"
+              :maxlength="answerLimit"
+              :disabled="requestBusy || !connected || answerLimit === 0"
+              aria-describedby="hearing-limit"
+              placeholder="例：背景をピンクにして、見出しに花をつけたい"
+              rows="3"
+            ></textarea>
+            <small id="hearing-limit">最初の内容と合わせて1000文字まで。追加できるのは{{ answerLimit }}文字です。</small>
+            <p v-if="answerLimit === 0">このカードを取り消して、最初の内容を短くして追加しなおしてね。</p>
+            <button
+              class="primary"
+              type="submit"
+              :disabled="!clarification.trim() || clarification.length > answerLimit || requestBusy || !connected"
+            >説明を追加して確認する</button>
+          </form>
+          <button
+            v-if='selectedIdea.status === "check_failed"'
+            class="primary retry-check"
+            :disabled="requestBusy || !connected"
+            type="button"
+            @click="retryCheck(selectedIdea)"
+          >もう一度確認する</button>
+        </div>
         <div class="card-actions"><button
             v-if='jobColumn(selectedIdea) === "todo"'
             :disabled="requestBusy || !connected"
