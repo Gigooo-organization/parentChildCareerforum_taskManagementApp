@@ -75,6 +75,10 @@
 .staff-toggle span { color: #895000; margin-left: 6px; }
 .staff-panel { position: absolute; z-index: 4; right: 12px; bottom: 36px; width: min(440px,calc(100% - 24px)); max-height: min(60dvh,500px); overflow-y: auto; padding: 14px; background: #fff; border: 1px solid #737d8b; border-radius: 14px; box-shadow: 0 6px 24px #1f2a3a33; }
 .staff-panel h3 { font-size: 14px; margin-bottom: 8px; }
+.ai-settings { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 6px 10px; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid #d6dde6; }
+.ai-settings h3, .ai-settings p, .ai-settings button { grid-column: 1 / -1; }
+.ai-settings select { width: 100%; border: 1px solid #737d8b; border-radius: 6px; padding: 4px; background: #fff; }
+.ai-settings-error { color: #8f1d45; }
 .staff-panel ul { list-style: none; }
 .staff-panel li { padding: 8px 0; border-top: 1px solid #d6dde6; overflow-wrap: anywhere; }
 .staff-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

@@ -9,6 +9,8 @@ import { useBoothJobs } from "./useBoothJobs";
 import { canRequestJob, clarificationLimit, jobColumn, jobStatusLabels } from "@booth-shared/jobs";
 import type { Job } from "@booth-shared/jobs";
 import { buildCatalog } from "./catalogBuild";
+import { aiProviders, aiSelectionLabel, parseAiSelection } from "@booth-shared/ai";
+import type { AiSelection } from "@booth-shared/ai";
 
 type Column = "todo" | "doing" | "done";
 type WorkspaceCard = CatalogCard & { column: Column; answers: Answer[] };
@@ -65,6 +67,18 @@ watch(selectedIdeaId, () => {
 const ideaDialog = useTemplateRef<HTMLDialogElement>("ideaDialog");
 const staffOpen = ref(false);
 const confirmReset = ref(false);
+const ai = ref<AiSelection>({ provider: "codex", model: "default" });
+const draftProvider = ref<AiSelection["provider"]>("codex");
+const draftModel = ref("default");
+const savingAi = ref(false);
+const aiError = ref("");
+const aiNotice = ref("");
+const aiLocked = computed(() =>
+  jobs.value.some((job) => job.status === "queued" || job.status === "running"),
+);
+const modelOptions = computed(() =>
+  draftProvider.value === "codex" ? aiProviders[0].models : aiProviders[1].models,
+);
 const staffJobs = computed(() =>
   jobs.value.filter((job) => job.status === "pending" || job.status === "queued"),
 );
@@ -91,6 +105,11 @@ async function removeIdea(job: Job) {
 async function answerIdea(job: Job) {
   if (await clarify(job, clarification.value)) clarification.value = "";
 }
+function setAi(selected: AiSelection) {
+  ai.value = selected;
+  draftProvider.value = selected.provider;
+  draftModel.value = selected.model;
+}
 
 async function loadState() {
   try {
@@ -100,6 +119,7 @@ async function loadState() {
     features.value = state.features;
     previewUrl.value = state.previewUrl;
     revision.value = state.revision;
+    setAi(state.ai);
     for (const card of cards.value) {
       switch (card.id) {
         case "points":
@@ -132,6 +152,57 @@ async function loadState() {
   }
 }
 onMounted(loadState);
+async function saveAi() {
+  if (savingAi.value || aiLocked.value || !ready.value) return;
+  savingAi.value = true;
+  aiError.value = "";
+  aiNotice.value = "";
+  try {
+    const selected = parseAiSelection({ provider: draftProvider.value, model: draftModel.value });
+    const response = await fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(selected),
+    }).catch(() => {
+      throw new Error("サーバーに接続できませんでした。もう一度試してください。");
+    });
+    const body: unknown = await response.json().catch(() => {
+      throw new Error("応答を読み取れませんでした。もう一度試してください。");
+    });
+    if (!response.ok)
+      throw new Error(
+        typeof body === "object" &&
+          body !== null &&
+          "error" in body &&
+          typeof body.error === "string"
+          ? body.error
+          : "作成用AIを変更できませんでした。もう一度試してください。",
+      );
+    setAi(parseWorkspaceState(body).ai);
+    aiNotice.value = "作成用AIを変更しました。";
+  } catch (cause) {
+    aiError.value = cause instanceof Error ? cause.message : "作成用AIを変更できませんでした。";
+  } finally {
+    savingAi.value = false;
+  }
+}
+async function toggleStaff() {
+  if (savingAi.value) return;
+  staffOpen.value = !staffOpen.value;
+  confirmReset.value = false;
+  if (!staffOpen.value) return;
+  savingAi.value = true;
+  try {
+    const response = await fetch("/api/state");
+    if (!response.ok) throw new Error();
+    setAi(parseWorkspaceState(await response.json()).ai);
+    aiError.value = "";
+  } catch {
+    aiError.value = "作成用AIの設定を読み取れませんでした。開きなおしてください。";
+  } finally {
+    savingAi.value = false;
+  }
+}
 async function resetWorkspace() {
   selectedIdeaId.value = null;
   ideaDialog.value?.close();
@@ -322,7 +393,8 @@ function dropCard() {
             type="button"
             :aria-expanded="staffOpen"
             aria-controls="staff-panel"
-            @click="staffOpen = !staffOpen; confirmReset = false"
+            :disabled="savingAi"
+            @click="toggleStaff"
           >スタッフ <span v-if="staffJobs.length">確認 {{ staffJobs.length }}件</span></button>
           <div
             v-if="staffOpen"
@@ -330,9 +402,32 @@ function dropCard() {
             aria-label="スタッフ操作"
             class="staff-panel"
             role="region"
-          ><h3>作成の依頼を確認する</h3><p v-if="!staffJobs.length">確認待ちの依頼はありません。</p><ul><li v-for="job in staffJobs" :key="job.id"><p>{{ job.prompt }}</p><div class="staff-actions"><button
+          >
+            <form class="ai-settings" @submit.prevent="saveAi">
+              <h3>作成用AI</h3>
+              <p v-if="ready">適用中：{{ aiSelectionLabel(ai) }}</p>
+              <label for="ai-provider">AI</label>
+              <select
+                id="ai-provider"
+                v-model="draftProvider"
+                :disabled="savingAi || aiLocked || !ready"
+                @change='draftModel = "default"'
+              >
+                <option v-for="provider in aiProviders" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+              </select>
+              <label for="ai-model">モデル</label>
+              <select id="ai-model" v-model="draftModel" :disabled="savingAi || aiLocked || !ready">
+                <option v-for="model in modelOptions" :key="model.id" :value="model.id">{{ model.label }}</option>
+              </select>
+              <button class="send" type="submit" :disabled="savingAi || aiLocked || !ready">{{ savingAi ? "更新中…" : "このAIとモデルを使う" }}</button>
+              <p v-if="aiLocked">作成が終わってから変更できます。</p>
+              <p v-else>次に承認する作成に使います。参加者をリセットしても選択は残ります。</p>
+              <p v-if="aiError" class="ai-settings-error" role="alert">{{ aiError }}</p>
+              <p v-if="aiNotice" role="status">{{ aiNotice }}</p>
+            </form>
+            <h3>作成の依頼を確認する</h3><p v-if="!staffJobs.length">確認待ちの依頼はありません。</p><ul><li v-for="job in staffJobs" :key="job.id"><p>{{ job.prompt }}</p><div class="staff-actions"><button
                     v-if='job.status === "pending"'
-                    :disabled="requestBusy || !connected"
+                    :disabled="requestBusy || !connected || savingAi"
                     class="send"
                     type="button"
                     @click='decide(job, "approve")'
