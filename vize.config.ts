@@ -18,6 +18,6 @@ export default defineConfig({
     jsxTypecheck: true,
   },
   vite: {
-    scanPatterns: ["src/**/*.vue"],
+    scanPatterns: ["src/**/*.vue", "booth-app/src/**/*.vue"],
   },
 });
