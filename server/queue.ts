@@ -69,7 +69,7 @@ export function createQueue<Snapshot = unknown>(
     const timer = setTimeout(() => {
       timedOut = true;
       abort.abort();
-    }, options.timeoutMs ?? 90_000);
+    }, options.timeoutMs ?? 180_000);
     job.status = "running";
     job.message = "AIが考えています";
     emit();
@@ -115,7 +115,7 @@ export function createQueue<Snapshot = unknown>(
         halted && error instanceof Error
           ? error.message
           : timedOut
-            ? "90秒で間に合わなかったため、変更前に戻しました。"
+            ? "3分で間に合わなかったため、変更前に戻しました。"
             : abort.signal.aborted
               ? "変更を中止して元に戻しました。"
               : error instanceof Error

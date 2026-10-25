@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { createQueue } from "./queue";
 import type { AgentOutput } from "./agent";
 
@@ -184,6 +184,44 @@ describe("approved serial queue", () => {
     expect(source).toBe("old");
     expect(queue.jobs()[0]?.status).toBe("failed");
     expect(queue.jobs()[0]?.message).toHaveLength(500);
+  });
+
+  it("allows three minutes including validation before timing out and restoring", async () => {
+    vi.useFakeTimers();
+    let source = "old";
+    const queue = createQueue({
+      assess: async () => "ready",
+      snapshot: async () => source,
+      restore: async (previous) => {
+        source = previous;
+      },
+      execute: async () => output,
+      apply: async () => {
+        source = "new";
+      },
+      validate: (signal) =>
+        new Promise<void>((_resolve, reject) =>
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+        ),
+    });
+    try {
+      const job = queue.submit("確認が終わるまで待って");
+      await vi.advanceTimersByTimeAsync(0);
+      queue.request(job.id);
+      queue.approve(job.id);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(source).toBe("new");
+      await vi.advanceTimersByTimeAsync(179_999);
+      expect(queue.jobs()[0]?.status).toBe("running");
+      expect(source).toBe("new");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(queue.jobs()[0]?.status).toBe("timed_out");
+      expect(queue.jobs()[0]?.message).toContain("3分");
+      expect(source).toBe("old");
+    } finally {
+      await queue.reset();
+      vi.useRealTimers();
+    }
   });
 
   it("times out and restores; reset waits for active cancellation and clears all jobs", async () => {
