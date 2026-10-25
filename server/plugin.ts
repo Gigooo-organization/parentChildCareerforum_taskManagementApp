@@ -20,6 +20,7 @@ export function createBoothMiddleware(
     features: await workspace.readFeatures(),
     previewUrl: previewUrl(),
     revision: workspace.revision,
+    ai: runtime?.ai ?? { provider: "codex", model: "default" },
   });
   return (req: IncomingMessage, res: ServerResponse, next: () => void) => {
     const path = req.url?.split("?", 1)[0];
@@ -30,6 +31,16 @@ export function createBoothMiddleware(
     void (async () => {
       assertLocalRequest(req);
       if (path === "/api/state" && req.method === "GET") {
+        sendJson(res, 200, await state());
+      } else if (path === "/api/ai" && req.method === "POST") {
+        if (!runtime) throw new HttpError(404, "作成用AIを利用できません。");
+        runtime.assertHealthy();
+        const revision = workspace.revision;
+        const body = await readJson(req);
+        runtime.assertHealthy();
+        if (workspace.revision !== revision)
+          throw new HttpError(409, "体験がリセットされました。画面を読み込みなおしてください。");
+        runtime.configureAi(body);
         sendJson(res, 200, await state());
       } else if (path === "/api/features" && req.method === "POST") {
         runtime?.assertHealthy();
@@ -53,7 +64,7 @@ export function createBoothMiddleware(
         else await workspace.reset();
         await resetPreview?.();
         sendJson(res, 200, await state());
-      } else if (["/api/state", "/api/features", "/api/reset"].includes(path)) {
+      } else if (["/api/state", "/api/features", "/api/reset", "/api/ai"].includes(path)) {
         throw new HttpError(405, "この操作は利用できません。");
       } else {
         throw new HttpError(404, "この操作は見つかりませんでした。");

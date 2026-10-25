@@ -13,6 +13,8 @@ import { createQueue } from "./queue";
 import { createHearingAssessor, type AssessHearing } from "./hearing";
 import { assertPreviewSource } from "./preview";
 import type { Workspace } from "./workspace";
+import { parseAiSelection, type AiSelection } from "../shared/ai";
+import { HttpError } from "./http";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 type Snapshot = { files: AgentOutput["files"]; changed: string[] };
@@ -23,6 +25,7 @@ export function createBoothRuntime(
   execute = runAgent,
   assess: AssessHearing = createHearingAssessor(undefined),
 ) {
+  let ai: AiSelection = { provider, model: "default" };
   let active: Snapshot | undefined;
   let healthy = true;
   let closed = false;
@@ -43,8 +46,10 @@ export function createBoothRuntime(
         throw error;
       }
     },
-    execute: (prompt, signal, onProgress) =>
-      execute({ provider, appDir: workspace.appDir, prompt, signal, onProgress }),
+    execute: (prompt, signal, onProgress) => {
+      const selected = { ...ai };
+      return execute({ ...selected, appDir: workspace.appDir, prompt, signal, onProgress });
+    },
     async apply(output) {
       if (!active) throw new Error("変更前の状態を読み取れませんでした。");
       for (const file of output.files) assertPreviewSource(file.content, file.path);
@@ -92,6 +97,17 @@ export function createBoothRuntime(
 
   return {
     queue,
+    get ai() {
+      return { ...ai };
+    },
+    configureAi(input: unknown) {
+      const selected = parseAiSelection(input);
+      if (!healthy || resetting || closed)
+        throw new Error("スタッフが「次の人へ」でリセットしてください。");
+      if (queue.jobs().some((job) => job.status === "queued" || job.status === "running"))
+        throw new HttpError(409, "作成が終わってから、AIとモデルを変更してください。");
+      ai = selected;
+    },
     get revision() {
       return workspace.revision;
     },

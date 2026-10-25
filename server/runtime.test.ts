@@ -190,3 +190,85 @@ describe("booth AI runtime", () => {
     runtime.assertHealthy();
   });
 });
+
+describe("runtime AI selection", () => {
+  it.each([
+    { provider: "codex", model: "gpt-6-luna" },
+    { provider: "claude", model: "sonnet" },
+  ])(
+    "passes the selected $provider model to generation and retains it after reset",
+    async (selected) => {
+      const { workspace } = await fixture();
+      const calls: { provider: string; model: string }[] = [];
+      const runtime = createBoothRuntime(workspace, "codex", async (options) => {
+        calls.push({ provider: options.provider, model: options.model });
+        throw new Error("test generation stopped");
+      });
+      runtimes.push(runtime);
+      runtime.configureAi(selected);
+      expect(runtime.ai).toEqual(selected);
+      const snapshot = runtime.ai;
+      snapshot.model = "default";
+      expect(runtime.ai).toEqual(selected);
+      const job = runtime.queue.submit("見出しを変えて");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      runtime.queue.request(job.id);
+      const done = finished(runtime, job.id);
+      runtime.queue.approve(job.id);
+      expect((await done).status).toBe("failed");
+      expect(calls).toEqual([selected]);
+      await runtime.reset();
+      expect(runtime.ai).toEqual(selected);
+      expect(() => runtime.configureAi({ provider: "codex", model: "opus" })).toThrow();
+      expect(runtime.ai).toEqual(selected);
+    },
+  );
+
+  it("rejects configuration while an approved job is queued or running", async () => {
+    const { workspace } = await fixture();
+    let release = () => {};
+    const blocked = workspace.serialize(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    let started = () => {};
+    const executing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const runtime = createBoothRuntime(workspace, "claude", async ({ signal }) => {
+      started();
+      return new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+      );
+    });
+    runtimes.push(runtime);
+    const selected = { provider: "claude", model: "opus" };
+    runtime.configureAi(selected);
+    try {
+      const job = runtime.queue.submit("見出しを変えて");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      runtime.queue.request(job.id);
+      runtime.queue.approve(job.id);
+      expect(runtime.queue.jobs()[0]?.status).toBe("queued");
+      expect(() => runtime.configureAi({ provider: "codex", model: "default" })).toThrow(
+        /作成が終わって/,
+      );
+      release();
+      await blocked;
+      await executing;
+      expect(runtime.queue.jobs()[0]?.status).toBe("running");
+      expect(() => runtime.configureAi({ provider: "codex", model: "default" })).toThrow(
+        /作成が終わって/,
+      );
+      expect(runtime.ai).toEqual(selected);
+    } finally {
+      release();
+      await blocked;
+      await runtime.reset();
+    }
+    runtime.configureAi({ provider: "codex", model: "gpt-6.1-sol" });
+    expect(runtime.ai).toEqual({ provider: "codex", model: "gpt-6.1-sol" });
+  });
+});

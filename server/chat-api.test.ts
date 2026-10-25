@@ -137,6 +137,7 @@ describe("staff-approved chat HTTP flow", () => {
   it.each([
     { path: "/api/chat", prefix: '{"prompt":', suffix: '"前の参加者の依頼"}', status: 400 },
     { path: "/api/features", prefix: '{"color":', suffix: '"pink"}', status: 409 },
+    { path: "/api/ai", prefix: '{"provider":', suffix: '"claude","model":"sonnet"}', status: 409 },
   ])(
     "rejects a delayed $path body after participant reset",
     async ({ path, prefix, suffix, status }) => {
@@ -164,6 +165,7 @@ describe("staff-approved chat HTTP flow", () => {
         expect(app.runtime.queue.jobs()).toEqual([]);
         expect(await app.workspace.readFeatures()).toEqual({ color: "blue" });
         expect(app.calls()).toBe(0);
+        expect(app.runtime.ai).toEqual({ provider: "codex", model: "default" });
       } finally {
         req.destroy();
         health.mockRestore();
@@ -313,4 +315,67 @@ it("publishes a sanitized failed check and accepts an explicit retry", async () 
   await stream.until((jobs) => jobs[0]?.status === "draft");
   expect(checks).toBe(2);
   expect(app.calls()).toBe(0);
+});
+
+describe("AI configuration HTTP boundary", () => {
+  it("reads back a validated choice and retains it after participant reset", async () => {
+    const app = await fixture();
+    expect(parseWorkspaceState(await (await fetch(app.url + "/api/state")).json()).ai).toEqual({
+      provider: "codex",
+      model: "default",
+    });
+    const selected = { provider: "claude", model: "sonnet" };
+    const response = await app.post("/api/ai", selected);
+    expect(response.status).toBe(200);
+    expect(parseWorkspaceState(await response.json()).ai).toEqual(selected);
+    expect(parseWorkspaceState(await (await fetch(app.url + "/api/state")).json()).ai).toEqual(
+      selected,
+    );
+    expect(parseWorkspaceState(await (await app.post("/api/reset", {})).json()).ai).toEqual(
+      selected,
+    );
+    expect(app.calls()).toBe(0);
+  });
+
+  it("rejects invalid pairs, cross-origin changes, malformed bodies and unsupported methods", async () => {
+    const app = await fixture();
+    const selected = { provider: "codex", model: "gpt-6-luna" };
+    expect((await app.post("/api/ai", { provider: "codex", model: "sonnet" })).status).toBe(400);
+    for (const origin of ["null", "https://example.com", "http://127.0.0.1:5174"])
+      expect((await app.post("/api/ai", selected, { origin })).status).toBe(403);
+    expect((await app.post("/api/ai", selected, { "content-type": "text/plain" })).status).toBe(
+      415,
+    );
+    expect((await fetch(app.url + "/api/ai")).status).toBe(405);
+    expect(
+      (
+        await fetch(app.url + "/api/ai", {
+          method: "POST",
+          headers: { origin: app.url, "content-type": "application/json" },
+          body: "{",
+        })
+      ).status,
+    ).toBe(400);
+    expect(app.runtime.ai).toEqual({ provider: "codex", model: "default" });
+  });
+
+  it("rejects configuration while an approved generation is active", async () => {
+    let started = () => {};
+    const executing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const app = await fixture(async ({ signal }) => {
+      started();
+      return new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+      );
+    });
+    const job = await app.submit();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.post(`/api/chat/${job.id}/request`, {});
+    await app.post(`/api/chat/${job.id}/approve`, {});
+    await executing;
+    expect((await app.post("/api/ai", { provider: "claude", model: "sonnet" })).status).toBe(409);
+    expect(app.runtime.ai).toEqual({ provider: "codex", model: "default" });
+  });
 });
