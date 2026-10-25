@@ -49,7 +49,9 @@ claude auth login
 BOOTH_AI_PROVIDER=claude pnpm dev
 ```
 
-AIを切り替えるときは、一度サーバーを終了してから起動します。再起動すると作品も初期化されます。既定のClaude設定ではmacOSのkeychain認証を利用します。独自の`CLAUDE_CONFIG_DIR`でkeychainだけを使う構成は未対応です。
+起動後は、画面下の**スタッフ**を開き、**作成用AI**でCodexまたはClaude Codeとモデルを選び、**このAIとモデルを使う**を押します。**適用中**に表示された選択を、次に承認する作成に使います。標準モデルはCLIの既定値です。明示的なモデル候補は、CodexがGPT-6.1-Sol・GPT-6-Astra・GPT-6-Luna、Claude CodeがSonnet・Opus・Fableです。利用できるモデルはログインしたアカウントとCLIに依存します。
+
+実行待ち・実行中はAI設定を変更できません。**次の人へ**で参加者をリセットしても選択は残ります。サーバーを再起動すると作品が初期化され、AIは起動時の`BOOTH_AI_PROVIDER`、モデルは標準に戻ります。既定のClaude設定ではmacOSのkeychain認証を利用します。独自の`CLAUDE_CONFIG_DIR`でkeychainだけを使う構成は未対応です。
 
 自由入力の内容確認には、プロジェクトの`.env`に`OPENROUTER_APIKEY`を設定します。サーバーを再起動すると読み込みます。キーはサーバー内だけで使い、ブラウザや作成用CLIへ渡しません。
 
