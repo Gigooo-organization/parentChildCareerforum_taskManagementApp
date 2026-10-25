@@ -11,6 +11,9 @@ const job = {
 describe("AI job snapshots", () => {
   it("accepts every status and returns a copy", () => {
     const statuses = [
+      "checking",
+      "hearing",
+      "check_failed",
       "draft",
       "pending",
       "queued",
@@ -44,6 +47,9 @@ describe("AI job snapshots", () => {
 });
 
 const boardStates: [JobStatus, "todo" | "doing" | "done" | null, boolean][] = [
+  ["checking", "todo", false],
+  ["hearing", "todo", false],
+  ["check_failed", "todo", false],
   ["draft", "todo", true],
   ["pending", "todo", false],
   ["queued", "doing", false],
@@ -57,4 +63,12 @@ it.each(boardStates)("maps %s into the board and build action", (status, column,
   const item = { ...job, status };
   expect(jobColumn(item)).toBe(column);
   expect(canRequestJob(item)).toBe(requestable);
+});
+
+it("reports how much clarification fits in the combined prompt", async () => {
+  const { clarificationLimit, clarificationPrefix } = await import("./jobs");
+  expect(clarificationLimit({ ...job, status: "hearing" })).toBe(
+    1000 - job.prompt.length - clarificationPrefix.length,
+  );
+  expect(clarificationLimit({ ...job, status: "hearing", prompt: "a".repeat(1000) })).toBe(0);
 });

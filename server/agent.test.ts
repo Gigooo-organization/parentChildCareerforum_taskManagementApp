@@ -167,3 +167,18 @@ it("requires successful provider completion, not just process exit zero", () => 
     parseCliOutput("codex", message + "\n" + JSON.stringify({ type: "turn.failed" })),
   ).toThrow();
 });
+
+it("does not pass the hearing API key to subprocesses", async () => {
+  const cwd = await directory();
+  const env = { ...process.env, OPENROUTER_APIKEY: "sentinel-not-a-real-key" };
+  expect(
+    await runCommand({
+      file: process.execPath,
+      args: ["-e", "process.stdout.write(String(process.env.OPENROUTER_APIKEY === undefined))"],
+      cwd,
+      env,
+      signal: new AbortController().signal,
+    }),
+  ).toBe("true");
+  expect(env.OPENROUTER_APIKEY).toBe("sentinel-not-a-real-key");
+});

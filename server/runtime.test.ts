@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Workspace } from "./workspace";
-import { createBoothRuntime } from "./runtime";
+import { createBoothRuntime as createRuntime } from "./runtime";
+
+const createBoothRuntime = (...args: Parameters<typeof createRuntime>) =>
+  createRuntime(args[0], args[1], args[2], async () => "ready");
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 const roots: string[] = [];
@@ -26,7 +29,12 @@ function finished(runtime: ReturnType<typeof createBoothRuntime>, id: string) {
   return new Promise<ReturnType<typeof runtime.queue.jobs>[number]>((resolve) => {
     const unsubscribe = runtime.queue.subscribe((jobs) => {
       const job = jobs.find((item) => item.id === id);
-      if (job && !["draft", "pending", "queued", "running"].includes(job.status)) {
+      if (
+        job &&
+        !["checking", "hearing", "check_failed", "draft", "pending", "queued", "running"].includes(
+          job.status,
+        )
+      ) {
         unsubscribe();
         resolve(job);
       }
@@ -50,6 +58,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("見出しを変えて");
     const done = finished(runtime, job.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("succeeded");
@@ -80,6 +89,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("壊れた変更のテスト");
     const done = finished(runtime, job.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("failed");
@@ -105,6 +115,7 @@ describe("booth AI runtime", () => {
     });
     runtimes.push(runtime);
     const job = runtime.queue.submit("変更して");
+    await new Promise((resolve) => setTimeout(resolve, 0));
     runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     await executing;
@@ -125,6 +136,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("変更して");
     const done = finished(runtime, job.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("failed");
@@ -145,6 +157,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("見た目を変えて");
     const done = finished(runtime, job.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).message).toContain("CSS");
@@ -167,6 +180,7 @@ describe("booth AI runtime", () => {
     runtimes.push(runtime);
     const job = runtime.queue.submit("変更して");
     const done = finished(runtime, job.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
     runtime.queue.request(job.id);
     runtime.queue.approve(job.id);
     expect((await done).status).toBe("failed");

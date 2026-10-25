@@ -1,11 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { join } from "node:path";
-import { createServer, type Plugin, type ViteDevServer } from "vite";
+import { createServer, loadEnv, type Plugin, type ViteDevServer } from "vite";
 import vize from "@vizejs/vite-plugin";
 import { Workspace } from "./workspace";
 import { previewBoundary } from "./preview";
 import { createBoothRuntime } from "./runtime";
 import { createChatApi } from "./chat-api";
+import { createHearingAssessor } from "./hearing";
 
 import { HttpError, assertLocalRequest, readJson, sendJson } from "./http";
 
@@ -157,7 +158,10 @@ export function boothPlugin(): Plugin {
         preview = undefined;
         throw error;
       }
-      runtime = createBoothRuntime(workspace, provider);
+      const apiKey =
+        process.env.OPENROUTER_APIKEY ??
+        loadEnv(server.config.mode, server.config.envDir, "").OPENROUTER_APIKEY;
+      runtime = createBoothRuntime(workspace, provider, undefined, createHearingAssessor(apiKey));
       chat = createChatApi(runtime);
       server.middlewares.use(chat.middleware);
       server.middlewares.use(

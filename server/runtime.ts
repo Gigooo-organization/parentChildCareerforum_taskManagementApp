@@ -10,18 +10,25 @@ import {
   type Provider,
 } from "./agent";
 import { createQueue } from "./queue";
+import { createHearingAssessor, type AssessHearing } from "./hearing";
 import { assertPreviewSource } from "./preview";
 import type { Workspace } from "./workspace";
 
 const repoRoot = fileURLToPath(new URL("../", import.meta.url));
 type Snapshot = { files: AgentOutput["files"]; changed: string[] };
 
-export function createBoothRuntime(workspace: Workspace, provider: Provider, execute = runAgent) {
+export function createBoothRuntime(
+  workspace: Workspace,
+  provider: Provider,
+  execute = runAgent,
+  assess: AssessHearing = createHearingAssessor(undefined),
+) {
   let active: Snapshot | undefined;
   let healthy = true;
   let closed = false;
   let resetting: Promise<void> | undefined;
   const queue = createQueue<Snapshot>({
+    assess,
     exclusive: (operation) =>
       workspace.serialize(async () => {
         if (!healthy || closed) throw new Error("作業フォルダをリセットしてください。");

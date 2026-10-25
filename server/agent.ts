@@ -114,10 +114,12 @@ export function runCommand(options: {
   onProgress?: () => void;
 }): Promise<string> {
   options.signal.throwIfAborted();
+  const env = { ...(options.env ?? process.env) };
+  delete env.OPENROUTER_APIKEY;
   return new Promise((resolveResult, reject) => {
     const child = spawn(options.file, options.args, {
       cwd: options.cwd,
-      env: options.env,
+      env,
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });

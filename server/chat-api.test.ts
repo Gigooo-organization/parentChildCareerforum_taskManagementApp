@@ -17,26 +17,34 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(execute?: Parameters<typeof createBoothRuntime>[2]) {
+async function fixture(
+  execute?: Parameters<typeof createBoothRuntime>[2],
+  assess: Parameters<typeof createBoothRuntime>[3] = async () => "ready",
+) {
   const root = await mkdtemp(join(tmpdir(), "booth-chat-api-"));
   await cp(join(repoRoot, "booth-app"), join(root, "booth-app"), { recursive: true });
   const workspace = new Workspace(root);
   await workspace.reset();
   const original = await readFile(join(workspace.appDir, "src", "App.vue"), "utf8");
   let calls = 0;
-  const runtime = createBoothRuntime(workspace, "codex", async (options) => {
-    calls++;
-    if (execute) return execute(options);
-    return {
-      files: [
-        {
-          path: "src/App.vue",
-          content: original.replaceAll("わたしの勉強リスト", "チャレンジリスト"),
-        },
-      ],
-      message: "見出しを変えました。",
-    };
-  });
+  const runtime = createBoothRuntime(
+    workspace,
+    "codex",
+    async (options) => {
+      calls++;
+      if (execute) return execute(options);
+      return {
+        files: [
+          {
+            path: "src/App.vue",
+            content: original.replaceAll("わたしの勉強リスト", "チャレンジリスト"),
+          },
+        ],
+        message: "見出しを変えました。",
+      };
+    },
+    assess,
+  );
   const chat = createChatApi(runtime);
   const base = createBoothMiddleware(workspace, () => "http://127.0.0.1:5174/", runtime);
   const server = createServer((req, res) =>
@@ -168,7 +176,7 @@ describe("staff-approved chat HTTP flow", () => {
     const stream = await app.events();
     expect(await stream.until(() => true)).toEqual([]);
     const job = await app.submit();
-    expect(job.status).toBe("draft");
+    expect(job.status).toBe("checking");
     await stream.until((jobs) =>
       jobs.some((item) => item.id === job.id && item.status === "draft"),
     );
@@ -244,4 +252,65 @@ describe("staff-approved chat HTTP flow", () => {
     expect(app.calls()).toBe(0);
     expect(app.runtime.queue.jobs()[0]?.status).toBe("draft");
   });
+});
+
+it("publishes a hearing decision, validates the answer and rechecks without starting generation", async () => {
+  const prompts: string[] = [];
+  const app = await fixture(undefined, async (prompt) => {
+    prompts.push(prompt);
+    return prompts.length === 1 ? "required" : "ready";
+  });
+  const job = await app.submit();
+  expect(job.status).toBe("checking");
+  const stream = await app.events();
+  await stream.until((jobs) => jobs[0]?.status === "hearing");
+  expect(
+    parseJobs([await (await app.post(`/api/chat/${job.id}/request`, {})).json()])[0]?.status,
+  ).toBe("hearing");
+  expect(
+    parseJobs([await (await app.post(`/api/chat/${job.id}/approve`, {})).json()])[0]?.status,
+  ).toBe("hearing");
+  expect((await app.post(`/api/chat/${job.id}/clarify`, { answer: " " })).status).toBe(400);
+  expect((await app.post(`/api/chat/${job.id}/clarify`, { answer: "x".repeat(1000) })).status).toBe(
+    400,
+  );
+  for (const action of ["clarify", "retry-check"])
+    expect(
+      (
+        await app.post(
+          `/api/chat/${job.id}/${action}`,
+          { answer: "pink" },
+          { origin: "https://example.com" },
+        )
+      ).status,
+    ).toBe(403);
+  expect(
+    (
+      await app.post(`/api/chat/${job.id}/clarify`, {
+        answer: "見出しを「チャレンジリスト」にして",
+      })
+    ).status,
+  ).toBe(200);
+  const ready = await stream.until((jobs) => jobs[0]?.status === "draft");
+  expect(ready[0]?.prompt).toBe("見出しを変えて\n追加の説明: 見出しを「チャレンジリスト」にして");
+  expect(app.calls()).toBe(0);
+  expect((await app.post(`/api/chat/${job.id}/request`, {})).status).toBe(200);
+  expect(app.runtime.queue.jobs()[0]?.status).toBe("pending");
+  expect(app.calls()).toBe(0);
+});
+
+it("publishes a sanitized failed check and accepts an explicit retry", async () => {
+  let checks = 0;
+  const app = await fixture(undefined, async () => {
+    if (++checks === 1) throw new Error("provider-secret");
+    return "ready";
+  });
+  const job = await app.submit();
+  const stream = await app.events();
+  const failed = await stream.until((jobs) => jobs[0]?.status === "check_failed");
+  expect(failed[0]?.message).not.toContain("provider-secret");
+  expect((await app.post(`/api/chat/${job.id}/retry-check`, {})).status).toBe(200);
+  await stream.until((jobs) => jobs[0]?.status === "draft");
+  expect(checks).toBe(2);
+  expect(app.calls()).toBe(0);
 });
