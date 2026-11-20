@@ -42,6 +42,10 @@ export function canRequestJob(job: Job) {
   return job.status === "draft" || job.status === "failed" || job.status === "timed_out";
 }
 
+export function canCancelJobRequest(job: Job) {
+  return job.status === "pending" || job.status === "queued";
+}
+
 function isStatus(value: unknown): value is JobStatus {
   return typeof value === "string" && Object.hasOwn(jobStatusLabels, value);
 }

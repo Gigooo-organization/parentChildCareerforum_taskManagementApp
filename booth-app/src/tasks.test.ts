@@ -2,10 +2,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { candidates, initialTasks } from "./tasks";
 
 describe("task choices", () => {
-  it("offers sixteen distinct activities including the initial three", () => {
+  it("offers sixteen distinct activities including the six starting tasks", () => {
     const titles = Object.values(candidates).flat();
     expect(new Set(titles).size).toBe(16);
-    for (const task of initialTasks()) expect(titles).toContain(task.title);
+    const startingTitles = initialTasks().map((task) => task.title);
+    expect(new Set(startingTitles).size).toBe(6);
+    for (const title of startingTitles) expect(titles).toContain(title);
   });
 
   it("starts each participant with fresh unchecked tasks", () => {

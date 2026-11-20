@@ -26,7 +26,14 @@ export const candidates = {
 };
 
 export function initialTasks() {
-  return ["数学の宿題をする", "英単語を10個覚える", "テスト勉強を30分する"].map((title) => ({
+  return [
+    "数学の宿題をする",
+    "英単語を10個覚える",
+    "テスト勉強を30分する",
+    "国語のワークを進める",
+    "苦手な問題を復習する",
+    "明日の持ち物を準備する",
+  ].map((title) => ({
     title,
     done: false,
   }));

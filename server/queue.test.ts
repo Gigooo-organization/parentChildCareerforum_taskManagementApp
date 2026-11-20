@@ -90,9 +90,11 @@ describe("approved serial queue", () => {
     ];
     expect(() => queue.submit("追加できない")).toThrow(/いっぱい/);
     expect(queue.jobs().map((job) => job.id)).toEqual(cards.map((job) => job.id));
+    const before = queue.jobs();
+    queue.request(first.id);
     queue.reject(first.id);
-    expect(queue.submit("取り消し後").status).toBe("checking");
-    expect(queue.jobs()).toHaveLength(30);
+    expect(() => queue.submit("取り消し後も追加できない")).toThrow(/いっぱい/);
+    expect(queue.jobs()).toEqual(before);
   });
 
   const failures: ("failed" | "timed_out")[] = ["failed", "timed_out"];
@@ -119,11 +121,13 @@ describe("approved serial queue", () => {
     queue.request(first.id);
     queue.approve(first.id);
     await finished(queue);
-    expect(queue.jobs()[0]?.status).toBe(status);
+    const [failed] = queue.jobs();
+    expect(failed?.status).toBe(status);
     for (let i = 0; i < 29; i++) queue.submit(`残り${i}`);
     expect(() => queue.submit("追加できない")).toThrow(/いっぱい/);
     expect(queue.jobs()[0]?.id).toBe(first.id);
     expect(queue.request(first.id).status).toBe("pending");
+    expect(queue.reject(first.id)).toEqual(failed);
   });
   it("requires approval, runs once and serially, and keeps events", async () => {
     let active = 0;
@@ -262,7 +266,7 @@ describe("approved serial queue", () => {
     expect(restored).toBe(2);
   });
 
-  it("rejects blank or long prompts and lets staff reject pending requests", async () => {
+  it("rejects blank or long prompts and restores a pending request to its draft", async () => {
     const queue = createQueue({
       assess: async () => "ready",
       snapshot: async () => null,
@@ -275,10 +279,52 @@ describe("approved serial queue", () => {
     expect(() => queue.submit("a".repeat(1001))).toThrow();
     const job = queue.submit("試して");
     await tick();
-    queue.reject(job.id);
-    expect(queue.jobs()[0]?.status).toBe("cancelled");
+    const [draft] = queue.jobs();
+    expect(queue.reject(job.id)).toEqual(draft);
+    expect(queue.request(job.id).status).toBe("pending");
+    expect(queue.reject(job.id)).toEqual(draft);
+    expect(queue.jobs()).toEqual([draft]);
+    expect(queue.approve(job.id)).toEqual(draft);
+    expect(queue.request(job.id).status).toBe("pending");
     expect(() => queue.approve("unknown")).toThrow();
   });
+});
+
+it("returns a queued card to its draft without running it when the workspace unlocks", async () => {
+  let release: (() => void) | undefined;
+  const lock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const queue = createQueue({
+    assess: async () => "ready",
+    snapshot: async () => null,
+    restore: async () => {},
+    execute: async () => {
+      calls++;
+      return output;
+    },
+    apply: async () => {},
+    validate: async () => {},
+    exclusive: async (operation) => {
+      await lock;
+      await operation();
+    },
+  });
+  const submitted = queue.submit("待機中");
+  await tick();
+  const [draft] = queue.jobs();
+  queue.request(submitted.id);
+  expect(queue.approve(submitted.id).status).toBe("queued");
+  expect(queue.reject(submitted.id)).toEqual(draft);
+  release?.();
+  const next = queue.submit("次の依頼");
+  await tick();
+  queue.request(next.id);
+  queue.approve(next.id);
+  await finished(queue);
+  expect(queue.jobs()).toEqual([draft, { ...next, status: "succeeded", message: output.message }]);
+  expect(calls).toBe(1);
 });
 
 it("halts after failed rollback instead of claiming a successful restore", async () => {
@@ -422,25 +468,22 @@ describe("hearing before a build", () => {
     expect(queue.jobs()[0]?.status).toBe("draft");
     expect(executions()).toBe(0);
   });
-  it.each(["reject", "reset"] as const)(
-    "aborts %s checks and ignores a provider that resolves after cancellation",
-    async (operation) => {
-      let resolve: ((value: "ready") => void) | undefined;
-      let signal: AbortSignal | undefined;
-      const { queue } = hearingQueue((_prompt, current) => {
-        signal = current;
-        return new Promise((done) => {
-          resolve = done;
-        });
+  it("keeps a checking card on withdrawal and aborts its check at reset", async () => {
+    let resolve: ((value: "ready") => void) | undefined;
+    let signal: AbortSignal | undefined;
+    const { queue } = hearingQueue((_prompt, current) => {
+      signal = current;
+      return new Promise((done) => {
+        resolve = done;
       });
-      const job = queue.submit("前の参加者");
-      if (operation === "reject") queue.reject(job.id);
-      else await queue.reset();
-      expect(signal?.aborted).toBe(true);
-      resolve?.("ready");
-      await tick();
-      if (operation === "reject") expect(queue.jobs()[0]?.status).toBe("cancelled");
-      else expect(queue.jobs()).toEqual([]);
-    },
-  );
+    });
+    const job = queue.submit("前の参加者");
+    expect(queue.reject(job.id)).toEqual(job);
+    expect(signal?.aborted).toBe(false);
+    await queue.reset();
+    expect(signal?.aborted).toBe(true);
+    resolve?.("ready");
+    await tick();
+    expect(queue.jobs()).toEqual([]);
+  });
 });

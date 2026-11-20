@@ -208,7 +208,57 @@ describe("staff-approved chat HTTP flow", () => {
     expect((await reconnected.until(() => true))[0]?.status).toBe("succeeded");
   }, 30_000);
 
-  it("never executes rejected work and reset cancels active work before restoring the participant", async () => {
+  it("replaces a pending request with drafts that can be approved in any order", async () => {
+    const first = "宿題に締切をつけて";
+    const second = "宿題をいい感じにして";
+    const third = "勉強を応援するひとことを追加して";
+    const app = await fixture(undefined, async (prompt) =>
+      prompt === second ? "required" : "ready",
+    );
+    const stream = await app.events();
+    const job = await app.submit();
+    const path = `/api/chat/${job.id}`;
+    const prompts = [first, second, third];
+    expect((await app.post(`${path}/split`, { prompts })).status).toBe(400);
+    await stream.until((jobs) => jobs[0]?.status === "draft");
+    expect((await app.post(`${path}/request`, {})).status).toBe(200);
+    expect((await app.post(`${path}/split`, { prompts: [first, " ", third] })).status).toBe(400);
+    expect(app.runtime.queue.jobs()).toMatchObject([{ id: job.id, status: "pending" }]);
+
+    expect((await app.post(`${path}/split`, { prompts })).status).toBe(200);
+    await stream.until(
+      (jobs) => jobs.length === 3 && jobs.every((job) => job.status === "checking"),
+    );
+    const drafts = await stream.until(
+      (jobs) => jobs.length === 3 && jobs.every((job) => job.status !== "checking"),
+    );
+    expect(drafts).toMatchObject([
+      { prompt: third, status: "draft" },
+      { prompt: second, status: "hearing" },
+      { prompt: first, status: "draft" },
+    ]);
+    expect(drafts.every((draft) => draft.id !== job.id)).toBe(true);
+    expect((await app.post(`${path}/split`, { prompts })).status).toBe(400);
+    expect((await app.post(`${path}/approve`, {})).status).toBe(400);
+    expect(app.calls()).toBe(0);
+
+    const selected = drafts.find((draft) => draft.prompt === third);
+    if (!selected) throw new Error("No selected draft");
+    const draftPath = `/api/chat/${selected.id}`;
+    expect((await app.post(`${draftPath}/approve`, {})).status).toBe(200);
+    expect(app.calls()).toBe(0);
+    expect((await app.post(`${draftPath}/request`, {})).status).toBe(200);
+    expect((await app.post(`${draftPath}/approve`, {})).status).toBe(200);
+    const result = await stream.until((jobs) => jobs.some((item) => item.status === "succeeded"));
+    expect(result).toMatchObject([
+      { id: selected.id, status: "succeeded" },
+      { prompt: second, status: "hearing" },
+      { prompt: first, status: "draft" },
+    ]);
+    expect(app.calls()).toBe(1);
+  }, 30_000);
+
+  it("returns a withdrawn request to its original card and reset cancels active work", async () => {
     let started = () => {};
     const executing = new Promise<void>((resolve) => {
       started = resolve;
@@ -220,13 +270,21 @@ describe("staff-approved chat HTTP flow", () => {
       );
     });
     const rejected = await app.submit();
-    expect((await app.post(`/api/chat/${rejected.id}/reject`, {})).status).toBe(200);
+    const stream = await app.events();
+    const ready = await stream.until((jobs) => jobs[0]?.status === "draft");
+    expect((await app.post(`/api/chat/${rejected.id}/request`, {})).status).toBe(200);
+    await stream.until((jobs) => jobs[0]?.status === "pending");
+    const withdrawn = await app.post(`/api/chat/${rejected.id}/reject`, {});
+    expect(withdrawn.status).toBe(200);
+    expect(await withdrawn.json()).toEqual(ready[0]);
+    expect(await stream.until((jobs) => jobs[0]?.status === "draft")).toEqual(ready);
     expect((await app.post(`/api/chat/${rejected.id}/approve`, {})).status).toBe(200);
     expect(app.calls()).toBe(0);
     await app.workspace.writeFeatures({ color: "pink", points: { per: 10 } });
     const active = await app.submit();
-    const stream = await app.events();
-    await stream.until(() => true);
+    await stream.until((jobs) =>
+      jobs.some((job) => job.id === active.id && job.status === "draft"),
+    );
     await app.post(`/api/chat/${active.id}/request`, {});
     await app.post(`/api/chat/${active.id}/approve`, {});
     await executing;
