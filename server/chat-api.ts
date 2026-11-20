@@ -65,9 +65,18 @@ export function createChatApi(runtime: Runtime) {
           sendJson(res, 201, runtime.queue.submit(prompt));
           return;
         }
-        const match = /^\/api\/chat\/([a-f0-9-]{36})\/(request|approve|reject)$/.exec(path);
+        const match = /^\/api\/chat\/([a-f0-9-]{36})\/(request|approve|reject|split)$/.exec(path);
         if (!match?.[1]) {
           sendJson(res, 404, { error: "依頼が見つかりません。" });
+          return;
+        }
+        if (match[2] === "split") {
+          const prompts =
+            typeof body === "object" && body !== null && "prompts" in body
+              ? body.prompts
+              : undefined;
+          runtime.queue.split(match[1], prompts);
+          sendJson(res, 200, {});
           return;
         }
         sendJson(

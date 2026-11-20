@@ -84,9 +84,10 @@ describe("approved serial queue", () => {
     ];
     expect(() => queue.submit("追加できない")).toThrow(/いっぱい/);
     expect(queue.jobs().map((job) => job.id)).toEqual(cards.map((job) => job.id));
+    queue.request(first.id);
     queue.reject(first.id);
-    expect(queue.submit("取り消し後").status).toBe("draft");
-    expect(queue.jobs()).toHaveLength(30);
+    expect(() => queue.submit("取り消し後も追加できない")).toThrow(/いっぱい/);
+    expect(queue.jobs()).toEqual(cards);
   });
 
   const failures: ("failed" | "timed_out")[] = ["failed", "timed_out"];
@@ -111,11 +112,13 @@ describe("approved serial queue", () => {
     queue.request(first.id);
     queue.approve(first.id);
     await finished(queue);
-    expect(queue.jobs()[0]?.status).toBe(status);
+    const [failed] = queue.jobs();
+    expect(failed?.status).toBe(status);
     for (let i = 0; i < 29; i++) queue.submit(`残り${i}`);
     expect(() => queue.submit("追加できない")).toThrow(/いっぱい/);
     expect(queue.jobs()[0]?.id).toBe(first.id);
     expect(queue.request(first.id).status).toBe("pending");
+    expect(queue.reject(first.id)).toEqual(failed);
   });
   it("requires approval, runs once and serially, and keeps events", async () => {
     let active = 0;
@@ -208,7 +211,7 @@ describe("approved serial queue", () => {
     expect(restored).toBe(2);
   });
 
-  it("rejects blank or long prompts and lets staff reject pending requests", () => {
+  it("rejects blank or long prompts and restores a pending request to its draft", () => {
     const queue = createQueue({
       snapshot: async () => null,
       restore: async () => {},
@@ -219,10 +222,47 @@ describe("approved serial queue", () => {
     expect(() => queue.submit(" ")).toThrow();
     expect(() => queue.submit("a".repeat(1001))).toThrow();
     const job = queue.submit("試して");
-    queue.reject(job.id);
-    expect(queue.jobs()[0]?.status).toBe("cancelled");
+    expect(queue.reject(job.id)).toEqual(job);
+    expect(queue.request(job.id).status).toBe("pending");
+    expect(queue.reject(job.id)).toEqual(job);
+    expect(queue.jobs()).toEqual([job]);
+    expect(queue.approve(job.id)).toEqual(job);
+    expect(queue.request(job.id).status).toBe("pending");
     expect(() => queue.approve("unknown")).toThrow();
   });
+});
+
+it("returns a queued card to its draft without running it when the workspace unlocks", async () => {
+  let release: (() => void) | undefined;
+  const lock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const queue = createQueue({
+    snapshot: async () => null,
+    restore: async () => {},
+    execute: async () => {
+      calls++;
+      return output;
+    },
+    apply: async () => {},
+    validate: async () => {},
+    exclusive: async (operation) => {
+      await lock;
+      await operation();
+    },
+  });
+  const draft = queue.submit("待機中");
+  queue.request(draft.id);
+  expect(queue.approve(draft.id).status).toBe("queued");
+  expect(queue.reject(draft.id)).toEqual(draft);
+  release?.();
+  const next = queue.submit("次の依頼");
+  queue.request(next.id);
+  queue.approve(next.id);
+  await finished(queue);
+  expect(queue.jobs()).toEqual([draft, { ...next, status: "succeeded", message: output.message }]);
+  expect(calls).toBe(1);
 });
 
 it("halts after failed rollback instead of claiming a successful restore", async () => {

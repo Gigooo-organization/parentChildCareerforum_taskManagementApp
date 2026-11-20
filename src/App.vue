@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, useTemplateRef } from "vue";
+import { computed, nextTick, onMounted, ref, useTemplateRef } from "vue";
 import { actionFromAnswers, applyAction, catalog, instructionFor } from "@booth-shared/catalog";
 import type { Answer, CatalogCard, CatalogId } from "@booth-shared/catalog";
 import { parseFeatures } from "@booth-shared/features";
 import type { Features } from "@booth-shared/features";
 import { parseWorkspaceState, safeUrl } from "@booth-shared/workspace";
 import { useBoothJobs } from "./useBoothJobs";
-import { canRequestJob, jobColumn, jobStatusLabels } from "@booth-shared/jobs";
+import { canCancelJobRequest, canRequestJob, jobColumn, jobStatusLabels } from "@booth-shared/jobs";
 import type { Job } from "@booth-shared/jobs";
 import { buildCatalog } from "./catalogBuild";
+import { suggestSplit } from "./splitSuggestion";
 
 type Column = "todo" | "doing" | "done";
 type WorkspaceCard = CatalogCard & { column: Column; answers: Answer[] };
@@ -46,6 +47,7 @@ const {
   submit,
   requestBuild,
   decide,
+  split,
   reset: resetBooth,
 } = useBoothJobs({ changed: loadState, reset: resetWorkspace });
 const connected = computed(() => connection.value === "connected");
@@ -54,10 +56,22 @@ const busy = computed(() => applying.value || aiRunning.value);
 const selectedIdeaId = ref<string | null>(null);
 const selectedIdea = computed(() => jobs.value.find((job) => job.id === selectedIdeaId.value));
 const ideaDialog = useTemplateRef<HTMLDialogElement>("ideaDialog");
+const staffDialog = useTemplateRef<HTMLDialogElement>("staffDialog");
+const staffClose = useTemplateRef<HTMLButtonElement>("staffClose");
 const staffOpen = ref(false);
 const confirmReset = ref(false);
-const staffJobs = computed(() =>
-  jobs.value.filter((job) => job.status === "pending" || job.status === "queued"),
+const splitIdea = ref<{ id: string; prompts: string[] } | null>(null);
+const staffJobs = computed(() => jobs.value.filter(canCancelJobRequest));
+const staffPendingCount = computed(
+  () => staffJobs.value.filter((job) => job.status === "pending").length,
+);
+const splitSuggestions = computed(
+  () =>
+    new Map(
+      staffJobs.value
+        .filter((job) => job.status === "pending")
+        .map((job) => [job.id, suggestSplit(job.prompt)]),
+    ),
 );
 const suggestions = [
   "見出しを「わたしのチャレンジリスト」に変えて",
@@ -68,6 +82,33 @@ const suggestions = [
 function jobsFor(column: Column) {
   return jobs.value.filter((job) => jobColumn(job) === column).reverse();
 }
+function openStaff() {
+  if (!staffDialog.value) return;
+  staffDialog.value.showModal();
+  staffOpen.value = true;
+}
+function closeStaff() {
+  staffOpen.value = false;
+  confirmReset.value = false;
+  splitIdea.value = null;
+}
+async function openSplit(job: Job) {
+  const suggested = splitSuggestions.value.get(job.id);
+  splitIdea.value = { id: job.id, prompts: suggested?.length ? [...suggested] : ["", ""] };
+  await nextTick();
+  staffDialog.value?.querySelector("textarea")?.focus();
+}
+async function saveSplit(job: Job) {
+  const draft = splitIdea.value;
+  if (draft?.id !== job.id || draft.prompts.some((part) => !part.trim())) return;
+  if (await split(job, draft.prompts)) {
+    splitIdea.value = null;
+    staffClose.value?.focus();
+  }
+}
+async function reviewIdea(job: Job, decision: "approve" | "reject") {
+  if (await decide(job, decision)) staffClose.value?.focus();
+}
 function openIdea(job: Job) {
   selectedIdeaId.value = job.id;
   ideaDialog.value?.showModal();
@@ -75,9 +116,6 @@ function openIdea(job: Job) {
 async function buildIdea(job: Job) {
   if (busy.value || requestBusy.value || !connected.value || !ready.value) return;
   if (await requestBuild(job)) ideaDialog.value?.close();
-}
-async function removeIdea(job: Job) {
-  if (await decide(job, "reject")) ideaDialog.value?.close();
 }
 
 async function loadState() {
@@ -124,6 +162,8 @@ async function resetWorkspace() {
   selectedIdeaId.value = null;
   ideaDialog.value?.close();
   confirmReset.value = false;
+  splitIdea.value = null;
+  staffDialog.value?.close();
   selectedId.value = null;
   dialog.value?.close();
   await loadState();
@@ -190,7 +230,15 @@ function dropCard() {
   <div class="workspace">
     <div class="left">
       <section aria-labelledby="board-title" class="panel board-panel">
-        <h1 id="board-title">次の開発リスト <small>カードでくわしく決めたら「作る」を押そう</small></h1>
+        <header class="board-head">
+          <h1 id="board-title">次の開発リスト <small>カードでくわしく決めたら「作る」を押そう</small></h1>
+          <button
+            :class='["staff-trigger", { "has-pending": staffPendingCount }]'
+            aria-haspopup="dialog"
+            type="button"
+            @click="openStaff"
+          >スタッフ確認<span v-if="staffPendingCount" class="staff-count">{{ staffPendingCount }}件待ち</span></button>
+        </header>
         <p v-if="error" class="error" role="alert">{{ error }} <button v-if="!ready" type="button" @click="loadState">再接続</button></p>
         <div class="cols">
           <section
@@ -282,7 +330,7 @@ function dropCard() {
               ? "カードの状態を読み取れません。スタッフに確認してください。"
               : "カードの状態に接続しています。カタログはそのまま使えます。"
           }}</p>
-        <p v-if="jobError" class="request-error" role="alert">{{ jobError }}</p>
+        <p v-if="jobError && !staffOpen" class="request-error" role="alert">{{ jobError }}</p>
         <p v-if="notice" class="input-notice" role="status">{{ notice }}</p>
         <div aria-label="アイデアの例" class="suggestions"><button
             v-for="suggestion in suggestions"
@@ -299,50 +347,6 @@ function dropCard() {
             placeholder="例：見出しを自分らしく変えて"
             rows="2"
           ></textarea><button :disabled="requestBusy || !connected || !prompt.trim()" class="send" type="submit">つぎに作るに追加</button></form>
-        <div class="staff"><button
-            class="staff-toggle"
-            type="button"
-            :aria-expanded="staffOpen"
-            aria-controls="staff-panel"
-            @click="staffOpen = !staffOpen; confirmReset = false"
-          >スタッフ <span v-if="staffJobs.length">確認 {{ staffJobs.length }}件</span></button>
-          <div
-            v-if="staffOpen"
-            id="staff-panel"
-            aria-label="スタッフ操作"
-            class="staff-panel"
-            role="region"
-          ><h3>作成の依頼を確認する</h3><p v-if="!staffJobs.length">確認待ちの依頼はありません。</p><ul><li v-for="job in staffJobs" :key="job.id"><p>{{ job.prompt }}</p><div class="staff-actions"><button
-                    v-if='job.status === "pending"'
-                    :disabled="requestBusy || !connected"
-                    class="send"
-                    type="button"
-                    @click='decide(job, "approve")'
-                  >承認してAIへ送る</button><button
-                    :disabled="requestBusy || !connected"
-                    class="cancel"
-                    type="button"
-                    @click='decide(job, "reject")'
-                  >{{ job.status === "queued" ? "順番待ちを取り消す" : "送らずに取り消す" }}</button></div></li></ul>
-            <div v-if="confirmReset" class="reset-confirm"><p>いまの作品とカードを消して、次の参加者の初期状態に戻します。</p><div class="staff-actions"><button
-                  :disabled="requestBusy || !connected"
-                  class="send"
-                  type="button"
-                  @click="resetBooth"
-                >リセットする</button><button
-                  :disabled="requestBusy"
-                  class="cancel"
-                  type="button"
-                  @click="confirmReset = false"
-                >戻る</button></div></div><button
-              v-else
-              :disabled="requestBusy || !connected"
-              class="cancel next"
-              type="button"
-              @click="confirmReset = true"
-            >次の人へ</button>
-          </div>
-        </div>
       </section>
     </div>
     <section aria-label="アプリのプレビュー" class="preview">
@@ -361,6 +365,108 @@ function dropCard() {
         </div>
       </div>
     </section>
+    <dialog
+      ref="staffDialog"
+      aria-labelledby="staff-title"
+      class="card-chat staff-dialog"
+      @close="closeStaff"
+    >
+      <header>
+        <div><h2 id="staff-title">スタッフ確認</h2><p v-if="staffPendingCount">{{ staffPendingCount }}件の依頼が確認待ち</p></div>
+        <button ref="staffClose" aria-label="閉じる" type="button" @click="staffDialog?.close()">×</button>
+      </header>
+      <div class="staff-body">
+        <p v-if="jobError && staffOpen" class="request-error" role="alert">{{ jobError }}</p>
+        <p v-if="!connected" class="connection" role="status">カードの状態に接続しています。</p>
+        <p v-else-if="!staffJobs.length" class="staff-empty">確認待ちや順番待ちの依頼はありません。</p>
+        <ul v-if="staffJobs.length" class="staff-requests">
+          <li v-for="job in staffJobs" :key="job.id" class="staff-request">
+            <span :class='["staff-status", { "is-pending": job.status === "pending" }]'>{{ jobStatusLabels[job.status] }}</span>
+            <p class="staff-prompt">{{ job.prompt }}</p>
+            <form
+              v-if='job.status === "pending" && splitIdea?.id === job.id'
+              class="split-form"
+              @submit.prevent="saveSplit(job)"
+            >
+              <p>カードの文面を確認して「つぎに作る」に追加します。</p>
+              <template v-for="(_, index) in splitIdea.prompts" :key="index">
+                <label :for='"split-part-" + index'>カード {{ index + 1 }}</label>
+                <textarea
+                  :id='"split-part-" + index'
+                  v-model="splitIdea.prompts[index]"
+                  :disabled="requestBusy"
+                  maxlength="1000"
+                  rows="2"
+                ></textarea>
+              </template>
+              <div class="staff-actions">
+                <button
+                  :disabled="requestBusy"
+                  class="cancel"
+                  type="button"
+                  @click="splitIdea = null"
+                >戻る</button>
+                <button
+                  :disabled="requestBusy || !connected || splitIdea.prompts.some((part) => !part.trim())"
+                  class="send"
+                  type="submit"
+                >分けて一覧に追加</button>
+              </div>
+            </form>
+            <div v-else class="staff-actions">
+              <button
+                :disabled="requestBusy || !connected"
+                class="staff-withdraw"
+                type="button"
+                @click='reviewIdea(job, "reject")'
+              >{{ job.status === "queued" ? "順番待ちを取り消す" : "確認依頼を取り消す" }}</button>
+              <template v-if='job.status === "pending"'>
+                <button
+                  :disabled="requestBusy || !connected"
+                  class="cancel"
+                  type="button"
+                  @click="openSplit(job)"
+                >{{
+                    splitSuggestions.get(job.id)?.length ? "分割案を見る" : "依頼を分ける"
+                  }}</button>
+                <button
+                  :disabled="requestBusy || !connected"
+                  class="send"
+                  type="button"
+                  @click='reviewIdea(job, "approve")'
+                >承認してAIへ送る</button>
+              </template>
+            </div>
+          </li>
+        </ul>
+      </div>
+      <footer class="staff-footer">
+        <template v-if="confirmReset">
+          <p>いまの作品とカードを消して、次の参加者の初期状態に戻します。</p>
+          <div class="staff-actions">
+            <button
+              :disabled="requestBusy"
+              class="cancel"
+              type="button"
+              @click="confirmReset = false"
+            >戻る</button>
+            <button
+              :disabled="requestBusy || !connected"
+              class="staff-reset"
+              type="button"
+              @click="resetBooth"
+            >リセットする</button>
+          </div>
+        </template>
+        <button
+          v-else
+          :disabled="requestBusy || !connected"
+          class="cancel"
+          type="button"
+          @click="confirmReset = true"
+        >次の人へ</button>
+      </footer>
+    </dialog>
     <dialog ref="cardDialog" aria-labelledby="card-title" class="card-chat">
       <template v-if="selected">
         <header><div><h2 id="card-title">{{ selected.title }}</h2><p>{{ selected.description }}</p></div><button aria-label="とじる" type="button" @click="dialog?.close()">×</button></header>
@@ -400,12 +506,12 @@ function dropCard() {
                   : selectedIdea.message
             }}</p><p v-if="jobError" class="request-error" role="alert">{{ jobError }}</p><progress v-if='selectedIdea.status === "running"' aria-label="AIが作成中です"></progress></div>
         <div class="card-actions"><button
-            v-if='jobColumn(selectedIdea) === "todo"'
+            v-if="canCancelJobRequest(selectedIdea)"
             :disabled="requestBusy || !connected"
             class="secondary"
             type="button"
-            @click="removeIdea(selectedIdea)"
-          >カードを取り消す</button><button
+            @click='decide(selectedIdea, "reject")'
+          >{{ selectedIdea.status === "queued" ? "順番待ちを取り消す" : "確認依頼を取り消す" }}</button><button
             v-if="canRequestJob(selectedIdea)"
             :disabled="busy || requestBusy || !connected || !ready"
             class="primary"
