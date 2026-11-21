@@ -63,6 +63,14 @@ describe("agent output boundary", () => {
     expect(await readFile(join(outside, "secret.ts"), "utf8")).toBe("untouched");
     await expect(readFile(join(app, "src/good.ts"))).rejects.toThrow();
   });
+
+  it("surfaces a clarification for an ambiguous request without accepting a change", () => {
+    const message = "どこの色を、何色にしたいですか？";
+    expect(() => parseAgentOutput({ files: [], message })).toThrow(message);
+    expect(() => parseAgentOutput({ files: [], message: " " })).toThrow(
+      "AIの変更内容が正しくありません。",
+    );
+  });
 });
 
 describe("bounded process runner", () => {
