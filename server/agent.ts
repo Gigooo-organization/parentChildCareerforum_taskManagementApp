@@ -106,6 +106,33 @@ export function sandboxProfile(binary: string, runtime: string) {
   return `(version 1) (allow default) (deny file-write*) (allow file-write* (subpath ${JSON.stringify(realpathSync(runtime))})) (allow file-write-data (literal "/dev/null")) (deny process-exec) (allow process-exec (literal ${JSON.stringify(binary)}))`;
 }
 
+function commandFailureHint(stderr: string) {
+  if (/unknown (option|argument|flag)|unexpected argument|unrecognized option/i.test(stderr))
+    return "unsupported CLI option";
+  if (/model.{0,100}(not found|not supported|not available|does not exist)/i.test(stderr))
+    return "model unavailable";
+  if (/unauthorized|authentication|credential|not logged in|401\b/i.test(stderr))
+    return "authentication";
+  if (/operation not permitted|permission denied|sandbox.*denied/i.test(stderr))
+    return "permission or sandbox";
+  if (/connection|network|econn|enotfound|timed out/i.test(stderr)) return "connection";
+  return undefined;
+}
+
+export class CommandFailure extends Error {
+  constructor(
+    message: string,
+    readonly details: {
+      exitCode?: number | null;
+      signal?: NodeJS.Signals | null;
+      spawnCode?: string;
+      hint?: string;
+    },
+  ) {
+    super(message);
+  }
+}
+
 export function runCommand(options: {
   file: string;
   args: string[];
@@ -127,6 +154,7 @@ export function runCommand(options: {
       stdio: ["pipe", "pipe", "pipe"],
     });
     const stdout: Buffer[] = [];
+    let stderr = "";
     let bytes = 0;
     let failure: Error | undefined;
     function stop(error: Error) {
@@ -148,19 +176,29 @@ export function runCommand(options: {
       else if (output) {
         stdout.push(chunk);
         options.onProgress?.();
+      } else {
+        stderr = (stderr + chunk.toString("utf8")).slice(-8192);
       }
     };
     child.stdout.on("data", (chunk: Buffer) => collect(chunk, true));
     child.stderr.on("data", (chunk: Buffer) => collect(chunk, false));
-    child.on("error", () => {
-      failure ??= new Error("AIコマンドを起動できません。スタッフに確認してください。");
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      failure ??= new CommandFailure("AIコマンドを起動できません。スタッフに確認してください。", {
+        spawnCode: error.code,
+      });
     });
     child.stdin.on("error", () => {});
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       options.signal.removeEventListener("abort", abort);
       if (failure) reject(failure);
       else if (code !== 0)
-        reject(new Error("AIの実行に失敗しました。スタッフが認証と接続を確認してください。"));
+        reject(
+          new CommandFailure("AIの実行に失敗しました。スタッフが認証と接続を確認してください。", {
+            exitCode: code,
+            signal,
+            hint: commandFailureHint(stderr),
+          }),
+        );
       else resolveResult(Buffer.concat(stdout).toString("utf8"));
     });
     child.stdin.end(options.input);

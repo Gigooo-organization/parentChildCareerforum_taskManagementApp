@@ -28,7 +28,7 @@ export const catalog: CatalogCard[] = [
   {
     id: "points",
     title: "ポイント機能",
-    description: "タスクを終わらせるとポイントが貯まる",
+    description: "タスクを完了するとポイントが貯まり、合計が見出しの右に出る",
     questions: [
       {
         text: "タスクを1つ終わらせたら、何ポイントもらえるようにする？",
@@ -39,7 +39,7 @@ export const catalog: CatalogCard[] = [
   {
     id: "progress",
     title: "進捗バー",
-    description: "今日の達成率を表示する",
+    description: "タスク一覧の上に、今日の達成率を表示する",
     questions: [
       {
         text: "達成率はどうやって見せる？",
@@ -53,7 +53,7 @@ export const catalog: CatalogCard[] = [
   {
     id: "celebrate",
     title: "お祝い機能",
-    description: "全部終わったらお祝いしてくれる",
+    description: "すべてのタスクを完了すると、お祝い画面が開く",
     questions: [
       {
         text: "お祝いしてくれるキャラクターはどれにする？",
@@ -69,7 +69,7 @@ export const catalog: CatalogCard[] = [
   {
     id: "taskOrder",
     title: "タスクを並べ替える",
-    description: "やることを見つけやすくする",
+    description: "タスク一覧を未完了が先か追加した順に並べる",
     questions: [
       {
         text: "タスクはどんな順番が見やすい？",
@@ -94,8 +94,8 @@ export const catalog: CatalogCard[] = [
   ...(["pink", "green", "orange", "blue"] satisfies Color[]).map(
     (id): CatalogCard => ({
       id,
-      title: `色を${colorNames[id]}に`,
-      description: "自分だけのテーマカラーにしよう",
+      title: `テーマカラーを${colorNames[id]}に`,
+      description: "勉強リストの背景や「タスクを追加」ボタンの色を変える",
       questions: [],
     }),
   ),
@@ -159,6 +159,6 @@ export function instructionFor(action: CatalogAction) {
     case "celebrate":
       return `すべてのタスクを完了したら、全画面でお祝いを表示する機能を追加して。キャラクターは ${action.face}、メッセージは「${action.msg}」にして。`;
     case "color":
-      return `アプリのテーマカラーを${colorNames[action.color]}にして。`;
+      return `勉強リストの背景や「タスクを追加」ボタンに使うテーマカラーを${colorNames[action.color]}にして。`;
   }
 }

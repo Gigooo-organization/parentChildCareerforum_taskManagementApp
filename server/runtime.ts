@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   applyFiles,
+  CommandFailure,
   readSource,
   runAgent,
   runCommand,
@@ -32,6 +33,17 @@ export function createBoothRuntime(
   let resetting: Promise<void> | undefined;
   const queue = createQueue<Snapshot>({
     assess,
+    onFailure(job, stage, error) {
+      const cause = error instanceof Error ? (error.cause ?? error) : error;
+      console.error("[booth] 作成に失敗しました", {
+        jobId: job.id,
+        ...ai,
+        status: job.status,
+        stage,
+        message: job.message,
+        ...(cause instanceof CommandFailure ? cause.details : {}),
+      });
+    },
     exclusive: (operation) =>
       workspace.serialize(async () => {
         if (!healthy || closed) throw new Error("作業フォルダをリセットしてください。");
@@ -88,9 +100,11 @@ export function createBoothRuntime(
           },
           signal,
         });
-      } catch {
+      } catch (cause) {
         signal.throwIfAborted();
-        throw new Error("変更したアプリを確認できなかったため、変更前に戻しました。");
+        throw new Error("変更したアプリを確認できなかったため、変更前に戻しました。", {
+          cause,
+        });
       }
     },
   });

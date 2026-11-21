@@ -9,7 +9,10 @@ import {
   type Job,
 } from "../shared/jobs";
 import { hearingUnavailable, type AssessHearing } from "./hearing";
+type FailureStage = "workspace" | "snapshot" | "agent" | "apply" | "validate" | "restore";
+
 type Hooks<Snapshot> = {
+  onFailure?: (job: Job, stage: FailureStage, error: unknown) => void;
   assess: AssessHearing;
   snapshot: () => Promise<Snapshot>;
   restore: (snapshot: Snapshot) => Promise<void>;
@@ -92,10 +95,12 @@ export function createQueue<Snapshot = unknown>(
     job.status = "running";
     job.message = "AIが考えています";
     emit();
+    let stage: FailureStage = "snapshot";
     try {
       const previous = await hooks.snapshot();
       try {
         abort.signal.throwIfAborted();
+        stage = "agent";
         const output = await hooks.execute(job.prompt, abort.signal, () => {
           if (job.message !== "AIから応答を受け取っています") {
             job.message = "AIから応答を受け取っています";
@@ -103,8 +108,10 @@ export function createQueue<Snapshot = unknown>(
           }
         });
         abort.signal.throwIfAborted();
+        stage = "apply";
         await hooks.apply(output);
         abort.signal.throwIfAborted();
+        stage = "validate";
         job.message = "変更を確かめています";
         emit();
         await hooks.validate(abort.signal);
@@ -114,10 +121,12 @@ export function createQueue<Snapshot = unknown>(
       } catch (error) {
         try {
           await hooks.restore(previous);
-        } catch {
+        } catch (restoreError) {
           halted = true;
+          stage = "restore";
           throw new Error(
             "変更前に戻せませんでした。スタッフが「次の人へ」でリセットしてください。",
+            { cause: restoreError },
           );
         }
         throw error;
@@ -141,6 +150,7 @@ export function createQueue<Snapshot = unknown>(
                 ? error.message
                 : "AIの変更に失敗しました。";
       job.message = job.message.slice(0, 500);
+      if (job.status !== "cancelled") hooks.onFailure?.(job, stage, error);
     } finally {
       clearTimeout(timer);
       controller = undefined;
@@ -158,10 +168,11 @@ export function createQueue<Snapshot = unknown>(
       try {
         if (hooks.exclusive) await hooks.exclusive(operation);
         else await operation();
-      } catch {
+      } catch (error) {
         job.status = "failed";
         job.message = "作業フォルダを利用できません。スタッフがリセットしてください。";
         halted = true;
+        hooks.onFailure?.(job, "workspace", error);
         emit();
       }
       next = jobs.find((job) => job.status === "queued");
