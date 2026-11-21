@@ -1,4 +1,7 @@
 export const jobStatusLabels = {
+  checking: "内容を確認しています",
+  hearing: "もう少し教えてね",
+  check_failed: "内容の確認をやり直そう",
   draft: "つぎに作る",
   pending: "スタッフの確認待ち",
   queued: "順番待ち",
@@ -12,6 +15,9 @@ export type JobStatus = keyof typeof jobStatusLabels;
 export type Job = { id: string; prompt: string; status: JobStatus; message: string };
 
 const columns = {
+  checking: "todo",
+  hearing: "todo",
+  check_failed: "todo",
   draft: "todo",
   pending: "todo",
   queued: "doing",
@@ -22,12 +28,22 @@ const columns = {
   cancelled: null,
 } satisfies Record<JobStatus, "todo" | "doing" | "done" | null>;
 
+export const clarificationPrefix = "\n追加の説明: ";
+
+export function clarificationLimit(job: Job) {
+  return Math.max(0, 1000 - job.prompt.length - clarificationPrefix.length);
+}
+
 export function jobColumn(job: Job) {
   return columns[job.status];
 }
 
 export function canRequestJob(job: Job) {
   return job.status === "draft" || job.status === "failed" || job.status === "timed_out";
+}
+
+export function canCancelJobRequest(job: Job) {
+  return job.status === "pending" || job.status === "queued";
 }
 
 function isStatus(value: unknown): value is JobStatus {

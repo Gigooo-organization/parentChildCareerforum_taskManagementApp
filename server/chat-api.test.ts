@@ -17,26 +17,34 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture(execute?: Parameters<typeof createBoothRuntime>[2]) {
+async function fixture(
+  execute?: Parameters<typeof createBoothRuntime>[2],
+  assess: Parameters<typeof createBoothRuntime>[3] = async () => "ready",
+) {
   const root = await mkdtemp(join(tmpdir(), "booth-chat-api-"));
   await cp(join(repoRoot, "booth-app"), join(root, "booth-app"), { recursive: true });
   const workspace = new Workspace(root);
   await workspace.reset();
   const original = await readFile(join(workspace.appDir, "src", "App.vue"), "utf8");
   let calls = 0;
-  const runtime = createBoothRuntime(workspace, "codex", async (options) => {
-    calls++;
-    if (execute) return execute(options);
-    return {
-      files: [
-        {
-          path: "src/App.vue",
-          content: original.replaceAll("わたしの勉強リスト", "チャレンジリスト"),
-        },
-      ],
-      message: "見出しを変えました。",
-    };
-  });
+  const runtime = createBoothRuntime(
+    workspace,
+    "codex",
+    async (options) => {
+      calls++;
+      if (execute) return execute(options);
+      return {
+        files: [
+          {
+            path: "src/App.vue",
+            content: original.replaceAll("わたしの勉強リスト", "チャレンジリスト"),
+          },
+        ],
+        message: "見出しを変えました。",
+      };
+    },
+    assess,
+  );
   const chat = createChatApi(runtime);
   const base = createBoothMiddleware(workspace, () => "http://127.0.0.1:5174/", runtime);
   const server = createServer((req, res) =>
@@ -129,6 +137,7 @@ describe("staff-approved chat HTTP flow", () => {
   it.each([
     { path: "/api/chat", prefix: '{"prompt":', suffix: '"前の参加者の依頼"}', status: 400 },
     { path: "/api/features", prefix: '{"color":', suffix: '"pink"}', status: 409 },
+    { path: "/api/ai", prefix: '{"provider":', suffix: '"claude","model":"sonnet"}', status: 409 },
   ])(
     "rejects a delayed $path body after participant reset",
     async ({ path, prefix, suffix, status }) => {
@@ -156,6 +165,7 @@ describe("staff-approved chat HTTP flow", () => {
         expect(app.runtime.queue.jobs()).toEqual([]);
         expect(await app.workspace.readFeatures()).toEqual({ color: "blue" });
         expect(app.calls()).toBe(0);
+        expect(app.runtime.ai).toEqual({ provider: "codex", model: "default" });
       } finally {
         req.destroy();
         health.mockRestore();
@@ -168,7 +178,7 @@ describe("staff-approved chat HTTP flow", () => {
     const stream = await app.events();
     expect(await stream.until(() => true)).toEqual([]);
     const job = await app.submit();
-    expect(job.status).toBe("draft");
+    expect(job.status).toBe("checking");
     await stream.until((jobs) =>
       jobs.some((item) => item.id === job.id && item.status === "draft"),
     );
@@ -198,7 +208,57 @@ describe("staff-approved chat HTTP flow", () => {
     expect((await reconnected.until(() => true))[0]?.status).toBe("succeeded");
   }, 30_000);
 
-  it("never executes rejected work and reset cancels active work before restoring the participant", async () => {
+  it("replaces a pending request with drafts that can be approved in any order", async () => {
+    const first = "宿題に締切をつけて";
+    const second = "宿題をいい感じにして";
+    const third = "勉強を応援するひとことを追加して";
+    const app = await fixture(undefined, async (prompt) =>
+      prompt === second ? "required" : "ready",
+    );
+    const stream = await app.events();
+    const job = await app.submit();
+    const path = `/api/chat/${job.id}`;
+    const prompts = [first, second, third];
+    expect((await app.post(`${path}/split`, { prompts })).status).toBe(400);
+    await stream.until((jobs) => jobs[0]?.status === "draft");
+    expect((await app.post(`${path}/request`, {})).status).toBe(200);
+    expect((await app.post(`${path}/split`, { prompts: [first, " ", third] })).status).toBe(400);
+    expect(app.runtime.queue.jobs()).toMatchObject([{ id: job.id, status: "pending" }]);
+
+    expect((await app.post(`${path}/split`, { prompts })).status).toBe(200);
+    await stream.until(
+      (jobs) => jobs.length === 3 && jobs.every((job) => job.status === "checking"),
+    );
+    const drafts = await stream.until(
+      (jobs) => jobs.length === 3 && jobs.every((job) => job.status !== "checking"),
+    );
+    expect(drafts).toMatchObject([
+      { prompt: third, status: "draft" },
+      { prompt: second, status: "hearing" },
+      { prompt: first, status: "draft" },
+    ]);
+    expect(drafts.every((draft) => draft.id !== job.id)).toBe(true);
+    expect((await app.post(`${path}/split`, { prompts })).status).toBe(400);
+    expect((await app.post(`${path}/approve`, {})).status).toBe(400);
+    expect(app.calls()).toBe(0);
+
+    const selected = drafts.find((draft) => draft.prompt === third);
+    if (!selected) throw new Error("No selected draft");
+    const draftPath = `/api/chat/${selected.id}`;
+    expect((await app.post(`${draftPath}/approve`, {})).status).toBe(200);
+    expect(app.calls()).toBe(0);
+    expect((await app.post(`${draftPath}/request`, {})).status).toBe(200);
+    expect((await app.post(`${draftPath}/approve`, {})).status).toBe(200);
+    const result = await stream.until((jobs) => jobs.some((item) => item.status === "succeeded"));
+    expect(result).toMatchObject([
+      { id: selected.id, status: "succeeded" },
+      { prompt: second, status: "hearing" },
+      { prompt: first, status: "draft" },
+    ]);
+    expect(app.calls()).toBe(1);
+  }, 30_000);
+
+  it("returns a withdrawn request to its original card and reset cancels active work", async () => {
     let started = () => {};
     const executing = new Promise<void>((resolve) => {
       started = resolve;
@@ -210,13 +270,21 @@ describe("staff-approved chat HTTP flow", () => {
       );
     });
     const rejected = await app.submit();
-    expect((await app.post(`/api/chat/${rejected.id}/reject`, {})).status).toBe(200);
+    const stream = await app.events();
+    const ready = await stream.until((jobs) => jobs[0]?.status === "draft");
+    expect((await app.post(`/api/chat/${rejected.id}/request`, {})).status).toBe(200);
+    await stream.until((jobs) => jobs[0]?.status === "pending");
+    const withdrawn = await app.post(`/api/chat/${rejected.id}/reject`, {});
+    expect(withdrawn.status).toBe(200);
+    expect(await withdrawn.json()).toEqual(ready[0]);
+    expect(await stream.until((jobs) => jobs[0]?.status === "draft")).toEqual(ready);
     expect((await app.post(`/api/chat/${rejected.id}/approve`, {})).status).toBe(200);
     expect(app.calls()).toBe(0);
     await app.workspace.writeFeatures({ color: "pink", points: { per: 10 } });
     const active = await app.submit();
-    const stream = await app.events();
-    await stream.until(() => true);
+    await stream.until((jobs) =>
+      jobs.some((job) => job.id === active.id && job.status === "draft"),
+    );
     await app.post(`/api/chat/${active.id}/request`, {});
     await app.post(`/api/chat/${active.id}/approve`, {});
     await executing;
@@ -243,5 +311,129 @@ describe("staff-approved chat HTTP flow", () => {
     expect((await fetch(app.url + "/api/chat")).status).toBe(405);
     expect(app.calls()).toBe(0);
     expect(app.runtime.queue.jobs()[0]?.status).toBe("draft");
+  });
+});
+
+it("publishes a hearing decision, validates the answer and rechecks without starting generation", async () => {
+  const prompts: string[] = [];
+  const app = await fixture(undefined, async (prompt) => {
+    prompts.push(prompt);
+    return prompts.length === 1 ? "required" : "ready";
+  });
+  const job = await app.submit();
+  expect(job.status).toBe("checking");
+  const stream = await app.events();
+  await stream.until((jobs) => jobs[0]?.status === "hearing");
+  expect(
+    parseJobs([await (await app.post(`/api/chat/${job.id}/request`, {})).json()])[0]?.status,
+  ).toBe("hearing");
+  expect(
+    parseJobs([await (await app.post(`/api/chat/${job.id}/approve`, {})).json()])[0]?.status,
+  ).toBe("hearing");
+  expect((await app.post(`/api/chat/${job.id}/clarify`, { answer: " " })).status).toBe(400);
+  expect((await app.post(`/api/chat/${job.id}/clarify`, { answer: "x".repeat(1000) })).status).toBe(
+    400,
+  );
+  for (const action of ["clarify", "retry-check"])
+    expect(
+      (
+        await app.post(
+          `/api/chat/${job.id}/${action}`,
+          { answer: "pink" },
+          { origin: "https://example.com" },
+        )
+      ).status,
+    ).toBe(403);
+  expect(
+    (
+      await app.post(`/api/chat/${job.id}/clarify`, {
+        answer: "見出しを「チャレンジリスト」にして",
+      })
+    ).status,
+  ).toBe(200);
+  const ready = await stream.until((jobs) => jobs[0]?.status === "draft");
+  expect(ready[0]?.prompt).toBe("見出しを変えて\n追加の説明: 見出しを「チャレンジリスト」にして");
+  expect(app.calls()).toBe(0);
+  expect((await app.post(`/api/chat/${job.id}/request`, {})).status).toBe(200);
+  expect(app.runtime.queue.jobs()[0]?.status).toBe("pending");
+  expect(app.calls()).toBe(0);
+});
+
+it("publishes a sanitized failed check and accepts an explicit retry", async () => {
+  let checks = 0;
+  const app = await fixture(undefined, async () => {
+    if (++checks === 1) throw new Error("provider-secret");
+    return "ready";
+  });
+  const job = await app.submit();
+  const stream = await app.events();
+  const failed = await stream.until((jobs) => jobs[0]?.status === "check_failed");
+  expect(failed[0]?.message).not.toContain("provider-secret");
+  expect((await app.post(`/api/chat/${job.id}/retry-check`, {})).status).toBe(200);
+  await stream.until((jobs) => jobs[0]?.status === "draft");
+  expect(checks).toBe(2);
+  expect(app.calls()).toBe(0);
+});
+
+describe("AI configuration HTTP boundary", () => {
+  it("reads back a validated choice and retains it after participant reset", async () => {
+    const app = await fixture();
+    expect(parseWorkspaceState(await (await fetch(app.url + "/api/state")).json()).ai).toEqual({
+      provider: "codex",
+      model: "default",
+    });
+    const selected = { provider: "claude", model: "sonnet" };
+    const response = await app.post("/api/ai", selected);
+    expect(response.status).toBe(200);
+    expect(parseWorkspaceState(await response.json()).ai).toEqual(selected);
+    expect(parseWorkspaceState(await (await fetch(app.url + "/api/state")).json()).ai).toEqual(
+      selected,
+    );
+    expect(parseWorkspaceState(await (await app.post("/api/reset", {})).json()).ai).toEqual(
+      selected,
+    );
+    expect(app.calls()).toBe(0);
+  });
+
+  it("rejects invalid pairs, cross-origin changes, malformed bodies and unsupported methods", async () => {
+    const app = await fixture();
+    const selected = { provider: "codex", model: "gpt-6-luna" };
+    expect((await app.post("/api/ai", { provider: "codex", model: "sonnet" })).status).toBe(400);
+    for (const origin of ["null", "https://example.com", "http://127.0.0.1:5174"])
+      expect((await app.post("/api/ai", selected, { origin })).status).toBe(403);
+    expect((await app.post("/api/ai", selected, { "content-type": "text/plain" })).status).toBe(
+      415,
+    );
+    expect((await fetch(app.url + "/api/ai")).status).toBe(405);
+    expect(
+      (
+        await fetch(app.url + "/api/ai", {
+          method: "POST",
+          headers: { origin: app.url, "content-type": "application/json" },
+          body: "{",
+        })
+      ).status,
+    ).toBe(400);
+    expect(app.runtime.ai).toEqual({ provider: "codex", model: "default" });
+  });
+
+  it("rejects configuration while an approved generation is active", async () => {
+    let started = () => {};
+    const executing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const app = await fixture(async ({ signal }) => {
+      started();
+      return new Promise((_resolve, reject) =>
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true }),
+      );
+    });
+    const job = await app.submit();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.post(`/api/chat/${job.id}/request`, {});
+    await app.post(`/api/chat/${job.id}/approve`, {});
+    await executing;
+    expect((await app.post("/api/ai", { provider: "claude", model: "sonnet" })).status).toBe(409);
+    expect(app.runtime.ai).toEqual({ provider: "codex", model: "default" });
   });
 });

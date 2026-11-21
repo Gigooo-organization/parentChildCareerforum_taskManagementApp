@@ -14,8 +14,9 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import type { AiSelection } from "../shared/ai";
 
-export type Provider = "claude" | "codex";
+export type Provider = AiSelection["provider"];
 export type AgentOutput = { files: { path: string; content: string }[]; message: string };
 const maxBytes = 256 * 1024;
 const sourcePath = /^src\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.(?:vue|ts|css)$/;
@@ -114,10 +115,12 @@ export function runCommand(options: {
   onProgress?: () => void;
 }): Promise<string> {
   options.signal.throwIfAborted();
+  const env = { ...(options.env ?? process.env) };
+  delete env.OPENROUTER_APIKEY;
   return new Promise((resolveResult, reject) => {
     const child = spawn(options.file, options.args, {
       cwd: options.cwd,
-      env: options.env,
+      env,
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -221,13 +224,14 @@ const schema = {
   },
 };
 
-export async function runAgent(options: {
-  provider: Provider;
-  appDir: string;
-  prompt: string;
-  signal: AbortSignal;
-  onProgress?: () => void;
-}): Promise<AgentOutput> {
+export async function runAgent(
+  options: AiSelection & {
+    appDir: string;
+    prompt: string;
+    signal: AbortSignal;
+    onProgress?: () => void;
+  },
+): Promise<AgentOutput> {
   if (process.platform !== "darwin")
     throw new Error("AIの安全な実行にはmacOSが必要です。カタログ機能はそのまま使えます。");
   await access("/usr/bin/sandbox-exec", constants.X_OK);
@@ -298,6 +302,7 @@ export async function runAgent(options: {
             "dontAsk",
             "--permission-prompts",
             "none",
+            ...(options.model === "default" ? [] : ["--model", options.model]),
           ]
         : [
             "exec",
@@ -325,6 +330,7 @@ export async function runAgent(options: {
             'web_search="disabled"',
             "-c",
             'approval_policy="never"',
+            ...(options.model === "default" ? [] : ["--model", options.model]),
             "-",
           ];
     const env: NodeJS.ProcessEnv = {

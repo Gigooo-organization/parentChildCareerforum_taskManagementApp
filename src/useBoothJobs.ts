@@ -1,5 +1,5 @@
 import { onMounted, onUnmounted, ref } from "vue";
-import { parseJobs } from "@booth-shared/jobs";
+import { canRequestJob, parseJobs } from "@booth-shared/jobs";
 import type { Job } from "@booth-shared/jobs";
 
 type Actions = { changed: () => void | Promise<void>; reset: () => void | Promise<void> };
@@ -90,7 +90,7 @@ export function useBoothJobs(actions: Actions) {
       for (const job of submitted)
         if (!jobs.value.some((existing) => existing.id === job.id)) jobs.value.push(job);
       prompt.value = "";
-      notice.value = "「つぎに作る」に追加しました。カードの「作る」で進めよう。";
+      notice.value = "「つぎに作る」に追加しました。カードで内容を確認してね。";
     });
   }
 
@@ -103,7 +103,32 @@ export function useBoothJobs(actions: Actions) {
 
   function decide(job: Job, decision: "approve" | "reject") {
     return perform(async () => {
-      await post(`/api/chat/${encodeURIComponent(job.id)}/${decision}`, {});
+      const result = await post(`/api/chat/${encodeURIComponent(job.id)}/${decision}`, {});
+      if (decision === "reject") {
+        const [updated] = parseJobs([result]);
+        if (!updated || !canRequestJob(updated))
+          throw new Error("すでに作成が始まったため取り消せませんでした。");
+        notice.value = "作成の依頼を取り消しました。カードは「つぎに作る」にあります。";
+      }
+    });
+  }
+
+  function split(job: Job, prompts: string[]) {
+    return perform(async () => {
+      await post(`/api/chat/${encodeURIComponent(job.id)}/split`, { prompts });
+      notice.value = "分けた依頼を「つぎに作る」に追加しました。作りたいカードから進めよう。";
+    });
+  }
+
+  function clarify(job: Job, answer: string) {
+    return perform(async () => {
+      await post(`/api/chat/${encodeURIComponent(job.id)}/clarify`, { answer });
+    });
+  }
+
+  function retryCheck(job: Job) {
+    return perform(async () => {
+      await post(`/api/chat/${encodeURIComponent(job.id)}/retry-check`, {});
     });
   }
 
@@ -128,6 +153,9 @@ export function useBoothJobs(actions: Actions) {
     submit,
     requestBuild,
     decide,
+    clarify,
+    retryCheck,
+    split,
     reset,
   };
 }

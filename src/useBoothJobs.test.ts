@@ -161,3 +161,40 @@ describe("idea card client flow", () => {
     expect(state.requestBusy.value).toBe(false);
   });
 });
+
+it("keeps a newer hearing event when the initial submission response arrives late", async () => {
+  const { state, events } = mount();
+  let respond: ((response: Response) => void) | undefined;
+  fetchMock.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        respond = resolve;
+      }),
+  );
+  state.prompt.value = draft.prompt;
+  const pending = state.submit();
+  events.publish([{ ...draft, status: "hearing" }]);
+  respond?.(Response.json({ ...draft, status: "checking" }, { status: 201 }));
+  expect(await pending).toBe(true);
+  expect(state.jobs.value[0]?.status).toBe("hearing");
+});
+
+it("sends clarification and retry without requesting or approving a build", async () => {
+  const { state, events } = mount();
+  const hearing: Job = { ...draft, status: "hearing" };
+  events.publish([hearing]);
+  fetchMock.mockResolvedValueOnce(Response.json({ ...hearing, status: "checking" }));
+  expect(await state.clarify(hearing, "背景をピンクにしたい")).toBe(true);
+  expect(fetchMock).toHaveBeenLastCalledWith(
+    `/api/chat/${draft.id}/clarify`,
+    expect.objectContaining({ body: JSON.stringify({ answer: "背景をピンクにしたい" }) }),
+  );
+  fetchMock.mockResolvedValueOnce(Response.json({ ...hearing, status: "checking" }));
+  expect(await state.retryCheck({ ...draft, status: "check_failed" })).toBe(true);
+  expect(fetchMock).toHaveBeenLastCalledWith(
+    `/api/chat/${draft.id}/retry-check`,
+    expect.objectContaining({ body: "{}" }),
+  );
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(state.jobs.value[0]?.status).toBe("hearing");
+});

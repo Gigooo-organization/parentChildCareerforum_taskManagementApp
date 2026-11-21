@@ -65,19 +65,40 @@ export function createChatApi(runtime: Runtime) {
           sendJson(res, 201, runtime.queue.submit(prompt));
           return;
         }
-        const match = /^\/api\/chat\/([a-f0-9-]{36})\/(request|approve|reject)$/.exec(path);
+        const match =
+          /^\/api\/chat\/([a-f0-9-]{36})\/(request|approve|reject|clarify|retry-check|split)$/.exec(
+            path,
+          );
         if (!match?.[1]) {
           sendJson(res, 404, { error: "依頼が見つかりません。" });
+          return;
+        }
+        if (match[2] === "split") {
+          const prompts =
+            typeof body === "object" && body !== null && "prompts" in body
+              ? body.prompts
+              : undefined;
+          runtime.queue.split(match[1], prompts);
+          sendJson(res, 200, {});
           return;
         }
         sendJson(
           res,
           200,
-          match[2] === "request"
-            ? runtime.queue.request(match[1])
-            : match[2] === "approve"
-              ? runtime.queue.approve(match[1])
-              : runtime.queue.reject(match[1]),
+          match[2] === "clarify"
+            ? runtime.queue.clarify(
+                match[1],
+                typeof body === "object" && body !== null && "answer" in body
+                  ? body.answer
+                  : undefined,
+              )
+            : match[2] === "retry-check"
+              ? runtime.queue.retryCheck(match[1])
+              : match[2] === "request"
+                ? runtime.queue.request(match[1])
+                : match[2] === "approve"
+                  ? runtime.queue.approve(match[1])
+                  : runtime.queue.reject(match[1]),
         );
       })().catch((error: unknown) => {
         if (res.headersSent) {
