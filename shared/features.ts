@@ -1,8 +1,11 @@
 export type Color = "blue" | "pink" | "green" | "orange";
+export type TaskOrder = "added" | "unfinished-first";
 export type Features = {
   color: Color;
   points?: { per: 5 | 10 | 100 };
   progress?: { number: boolean };
+  taskOrder?: TaskOrder;
+  goal?: string;
   celebrate?: { face: "🥳" | "🐱" | "🚀"; msg: string };
 };
 
@@ -15,10 +18,13 @@ function onlyKeys(value: Record<string, unknown>, keys: readonly string[]) {
 }
 
 export function parseFeatures(input: unknown): Features {
-  if (!isRecord(input) || !onlyKeys(input, ["color", "points", "progress", "celebrate"])) {
+  if (
+    !isRecord(input) ||
+    !onlyKeys(input, ["color", "points", "progress", "celebrate", "taskOrder", "goal"])
+  ) {
     throw new Error("機能の設定が正しくありません。");
   }
-  const { color, points, progress, celebrate } = input;
+  const { color, points, progress, celebrate, taskOrder, goal } = input;
   if (color !== "blue" && color !== "pink" && color !== "green" && color !== "orange") {
     throw new Error("色はブルー・ピンク・グリーン・オレンジから選んでください。");
   }
@@ -55,6 +61,16 @@ export function parseFeatures(input: unknown): Features {
       throw new Error("お祝いのキャラクターと1〜80文字のメッセージを選んでください。");
     }
     features.celebrate = { face: celebrate.face, msg: celebrate.msg };
+  }
+  if (taskOrder !== undefined) {
+    if (taskOrder !== "added" && taskOrder !== "unfinished-first")
+      throw new Error("タスクの並び順が正しくありません。");
+    features.taskOrder = taskOrder;
+  }
+  if (goal !== undefined) {
+    if (typeof goal !== "string" || !goal.trim() || goal.trim().length > 80)
+      throw new Error("今日の目標は1〜80文字で入力してください。");
+    features.goal = goal.trim();
   }
   return features;
 }

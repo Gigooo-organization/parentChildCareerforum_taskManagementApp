@@ -1,11 +1,13 @@
-import type { Color, Features } from "./features";
+import type { Color, Features, TaskOrder } from "./features";
 
-export type CatalogId = "points" | "progress" | "celebrate" | Color;
+export type CatalogId = "points" | "progress" | "celebrate" | "taskOrder" | "goal" | Color;
 export type Answer = string | number | boolean;
 export type CatalogAction =
   | { kind: "points"; per: 5 | 10 | 100 }
   | { kind: "progress"; number: boolean }
   | { kind: "celebrate"; face: "🥳" | "🐱" | "🚀"; msg: string }
+  | { kind: "taskOrder"; order: TaskOrder }
+  | { kind: "goal"; text: string }
   | { kind: "color"; color: Color };
 export type Question = { text: string; options: { label: string; value: Answer }[] };
 export type CatalogCard = {
@@ -16,6 +18,11 @@ export type CatalogCard = {
 };
 
 const praise = ["よくがんばりました！", "天才！", "明日もこの調子！"];
+const goalOptions = [
+  "今日の宿題を全部終わらせる",
+  "あと回しにしていたタスクを1つ終わらせる",
+  "苦手な教科を10分だけやる",
+];
 export const colorNames = { blue: "ブルー", pink: "ピンク", green: "グリーン", orange: "オレンジ" };
 export const catalog: CatalogCard[] = [
   {
@@ -59,6 +66,31 @@ export const catalog: CatalogCard[] = [
       { text: "なんてほめてもらう？", options: praise.map((value) => ({ label: value, value })) },
     ],
   },
+  {
+    id: "taskOrder",
+    title: "タスクを並べ替える",
+    description: "やることを見つけやすくする",
+    questions: [
+      {
+        text: "タスクはどんな順番が見やすい？",
+        options: [
+          { label: "まだ終わっていないタスクを上に", value: "unfinished-first" },
+          { label: "追加した順", value: "added" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "goal",
+    title: "今日の目標を表示する",
+    description: "勉強リストの上に目標を出す",
+    questions: [
+      {
+        text: "今日の目標はどれにする？",
+        options: goalOptions.map((text) => ({ label: text, value: text })),
+      },
+    ],
+  },
   ...(["pink", "green", "orange", "blue"] satisfies Color[]).map(
     (id): CatalogCard => ({
       id,
@@ -82,6 +114,14 @@ export function actionFromAnswers(id: CatalogId, answers: readonly Answer[]): Ca
         praise.includes(second)
         ? { kind: "celebrate", face: first, msg: second }
         : null;
+    case "taskOrder":
+      return first === "added" || first === "unfinished-first"
+        ? { kind: "taskOrder", order: first }
+        : null;
+    case "goal":
+      return typeof first === "string" && goalOptions.includes(first)
+        ? { kind: "goal", text: first }
+        : null;
     default:
       return { kind: "color", color: id };
   }
@@ -95,6 +135,10 @@ export function applyAction(features: Features, action: CatalogAction): Features
       return { ...features, progress: { number: action.number } };
     case "celebrate":
       return { ...features, celebrate: { face: action.face, msg: action.msg } };
+    case "taskOrder":
+      return { ...features, taskOrder: action.order };
+    case "goal":
+      return { ...features, goal: action.text };
     case "color":
       return { ...features, color: action.color };
   }
@@ -102,6 +146,12 @@ export function applyAction(features: Features, action: CatalogAction): Features
 
 export function instructionFor(action: CatalogAction) {
   switch (action.kind) {
+    case "taskOrder":
+      return action.order === "unfinished-first"
+        ? "まだ終わっていないタスクを一覧の上にまとめて。同じグループでは追加した順に並べて。"
+        : "タスクは完了しているかに関係なく、追加した順に並べて。";
+    case "goal":
+      return `勉強リストの上に、今日の目標「${action.text}」を表示して。`;
     case "points":
       return `タスクを完了すると ${action.per} ポイント貯まる機能を追加して。合計ポイントはヘッダーの右に表示して。`;
     case "progress":

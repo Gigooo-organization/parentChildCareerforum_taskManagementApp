@@ -28,6 +28,10 @@
   .rate div:first-child { display: flex; justify-content: space-between; align-items: baseline; font-weight: bold; }
   .rate b { font-size: 20px; }
 
+  .study-goal { background: var(--soft); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; }
+  .study-goal h2 { font-size: 12px; color: var(--ink); margin-bottom: 2px; }
+  .study-goal p { font-size: 14px; font-weight: bold; }
+
   .tasks { list-style: none; display: grid; gap: 10px; }
   .tasks label {
     display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 14px;

@@ -31,8 +31,6 @@ export function initialTasks() {
     "英単語を10個覚える",
     "テスト勉強を30分する",
     "国語のワークを進める",
-    "苦手な問題を復習する",
-    "明日の持ち物を準備する",
   ].map((title) => ({
     title,
     done: false,
