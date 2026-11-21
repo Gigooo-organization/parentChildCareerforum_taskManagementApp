@@ -180,6 +180,12 @@ async function loadState() {
             ? [state.features.celebrate.face, state.features.celebrate.msg]
             : [];
           break;
+        case "taskOrder":
+          card.answers = state.features.taskOrder ? [state.features.taskOrder] : [];
+          break;
+        case "goal":
+          card.answers = state.features.goal ? [state.features.goal] : [];
+          break;
         default:
           card.answers = [];
       }

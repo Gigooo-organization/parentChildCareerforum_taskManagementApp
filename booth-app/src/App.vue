@@ -7,6 +7,11 @@ import { candidates, initialTasks } from "./tasks";
 const features = shallowRef(parseFeatures(initialFeatures));
 const tasks = ref(initialTasks());
 const summary = computed(() => summarizeTasks(tasks.value, features.value));
+const displayedTasks = computed(() =>
+  features.value.taskOrder === "unfinished-first"
+    ? [...tasks.value].sort((first, second) => Number(first.done) - Number(second.done))
+    : tasks.value,
+);
 const addedTitles = computed(() => new Set(tasks.value.map((task) => task.title)));
 const addDialog = useTemplateRef<HTMLDialogElement>("addDialog");
 const celebrateDialog = useTemplateRef<HTMLDialogElement>("celebrateDialog");
@@ -50,8 +55,12 @@ if (import.meta.hot) {
         <div>今日の達成率 <b v-if="features.progress.number">{{ summary.percent }}%</b></div>
         <progress :value="summary.percent" aria-label="タスクの達成率" max="100">{{ summary.percent }}%</progress>
       </section>
+      <section v-if="features.goal" aria-labelledby="study-goal-title" class="study-goal">
+        <h2 id="study-goal-title">今日の目標</h2>
+        <p>{{ features.goal }}</p>
+      </section>
       <ul class="tasks">
-        <li v-for="task in tasks" :key="task.title">
+        <li v-for="task in displayedTasks" :key="task.title">
           <label><input v-model="task.done" type="checkbox" />{{ task.title }}<span v-if="features.points && task.done" class="plus">+{{ features.points.per }}P</span></label>
         </li>
       </ul>
