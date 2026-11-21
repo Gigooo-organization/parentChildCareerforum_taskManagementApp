@@ -6,20 +6,27 @@
 
 AIを使う体験には、macOSと`/usr/bin/sandbox-exec`が必要です。カタログだけならAIの認証やインターネット接続は不要です。初回の依存関係のインストールは、回線がある場所で済ませてください。
 
-Nixとdirenvを使う場合は、リポジトリで次を実行します。
-
-```sh
-direnv allow
-pnpm install --frozen-lockfile
-```
-
-direnvを使わない場合は、先に`nix develop`へ入ってください。Nixを使わない環境では、`package.json`のNodeとpnpmのバージョン条件を満たしてください。
-
 起動のたびに前の作品を初期化します。残したいコードは、起動前に保存してください。
 
+miseを使う場合は、リポジトリで次を実行します。
+
 ```sh
+mise trust
+mise run setup
+mise run dev
+```
+
+direnvも使う場合は、シェルでdirenvのフックを有効にしてから、リポジトリで `mise exec -- direnv allow` を一度実行します。以後はこのディレクトリに入るとmiseのツールが読み込まれ、`pnpm dev` でも起動できます。
+
+Nixを使う場合は、次を実行します。miseが入っていない環境では、`direnv allow` でもNixの環境に入れます。
+
+```sh
+nix develop
+pnpm install --frozen-lockfile
 pnpm dev
 ```
+
+miseもNixも使わない場合は、`package.json` のNodeとpnpmのバージョン条件を満たしてください。
 
 ブラウザで`http://127.0.0.1:5173/`を開きます。スマホ枠のプレビューは、同じPCの5174ポートで動きます。会場ではこのPCのブラウザを参加者と一緒に操作してください。外部公開用のサーバーではありません。
 
@@ -92,6 +99,8 @@ cp .booth/app/features.json "$HOME/Desktop/booth-work/"
 実行中のAIがあれば、停止と復元を待ってから初期化します。`booth-app/`は初期テンプレートです。参加者の作品を保存するために直接編集しないでください。
 
 ## 変更を確認する
+
+miseを使う場合は、`mise run check`で以下のチェックをまとめて実行できます。
 
 ```sh
 pnpm test --run
